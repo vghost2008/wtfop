@@ -1,0 +1,10 @@
+*.pyc
+*.bin
+*.so
+*.so.dSYM
+*.swp
+*~
+__pycache__
+.idea
+.DS_Store
+build
