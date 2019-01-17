@@ -116,6 +116,13 @@ def boxes_nms(bboxes, classes, threshold=0.45,classes_wise=True):
         classes = tf.cast(classes,tf.int32)
     out = wtfop_module.boxes_nms(bottom_box=bboxes,classes=classes,threshold=threshold,classes_wise=classes_wise)
     return out[0],out[1],tf.cast(out[2],tf.int32)
+
+def boxes_soft_nms(bboxes, classes, confidence,threshold=0.45,delta=0.5,classes_wise=True):
+    if classes.dtype != tf.int32:
+        classes = tf.cast(classes,tf.int32)
+    out = wtfop_module.boxes_soft_nms(bottom_box=bboxes,classes=classes,confidence=confidence,threshold=threshold,delta=delta,classes_wise=classes_wise)
+    return out[0],out[1],tf.cast(out[2],tf.int32)
+
 def e_boxes_nms(bboxes, classes, threshold=0.45,k=0):
     if classes.dtype != tf.int32:
         classes = tf.cast(classes,tf.int32)

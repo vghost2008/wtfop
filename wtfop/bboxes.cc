@@ -224,6 +224,127 @@ class BoxesNmsOp: public OpKernel {
 };
 REGISTER_KERNEL_BUILDER(Name("BoxesNms").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesNmsOp<CPUDevice, float>);
 /*
+ * 数据不需要排序
+ * bottom_box:[X,4](ymin,xmin,ymax,xmax)
+ * classes:[X]
+ * confidence:[X]
+ * output_box:[Y,4]
+ * output_classes:[Y]
+ * output_index:[Y]
+ * 输出时的相对位置不能改变
+ */
+REGISTER_OP("BoxesSoftNms")
+    .Attr("T: {float, double,int32}")
+	.Attr("threshold:float")
+	.Attr("classes_wise:bool")
+	.Attr("delta:float")
+    .Input("bottom_box: T")
+    .Input("classes: int32")
+    .Input("confidence:float")
+	.Output("output_box:T")
+	.Output("output_classes:int32")
+	.Output("output_index:int32")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+			c->set_output(0, c->Matrix(-1, 4));
+			c->set_output(1, c->Vector(-1));
+			c->set_output(2, c->Vector(-1));
+			return Status::OK();
+			});
+
+template <typename Device, typename T>
+class BoxesSoftNmsOp: public OpKernel {
+    public:
+        struct InterData
+        {
+            int index;
+            float score;
+            bool operator<(const InterData& v)const {
+                return score<v.score;
+            }
+        };
+        explicit BoxesSoftNmsOp(OpKernelConstruction* context) : OpKernel(context) {
+            OP_REQUIRES_OK(context, context->GetAttr("threshold", &threshold));
+            OP_REQUIRES_OK(context, context->GetAttr("classes_wise", &classes_wise));
+            OP_REQUIRES_OK(context, context->GetAttr("delta", &delta));
+        }
+
+        void Compute(OpKernelContext* context) override
+        {
+            const Tensor &bottom_box          = context->input(0);
+            const Tensor &bottom_classes      = context->input(1);
+            const Tensor &confidence          = context->input(2);
+            auto          bottom_box_flat     = bottom_box.flat<T>();
+            auto          bottom_classes_flat = bottom_classes.flat<int32>();
+            auto          confidence_flat     = confidence.flat<float>();
+
+            OP_REQUIRES(context, bottom_box.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
+            OP_REQUIRES(context, bottom_classes.dims() == 1, errors::InvalidArgument("classes data must be 1-dimensional"));
+            OP_REQUIRES(context, confidence.dims() == 1, errors::InvalidArgument("confidence data must be 1-dimensional"));
+
+            const auto   data_nr           = bottom_box.dim_size(0);
+            vector<InterData> set_D(data_nr,InterData({0,0.0f}));
+            vector<InterData> set_B;
+            const auto   loop_end          = data_nr-1;
+
+            for(auto i=0; i<data_nr; ++i) {
+                set_D[i].index = i;
+            }
+            set_B.reserve(data_nr);
+
+            for(auto i=0; i<data_nr; ++i) {
+                auto it = max_element(set_D.begin(),set_D.end());
+                if(it->score<threshold)
+                    break;
+                auto M = *it;
+                set_D.erase(it);
+                set_B.push_back(M);
+                const auto index = M.index;
+                const auto iclass = bottom_classes_flat(index);
+                for(auto& data:set_D) {
+                    const auto j = data.index;
+                    if(classes_wise && (bottom_classes_flat(j) != iclass)) continue;
+                    const auto iou = bboxes_jaccard(bottom_box_flat.data()+index*4,bottom_box_flat.data()+j*4);
+                    if(iou>1e-2)
+                        data.score *= exp(-iou*iou/delta);
+                }
+            }
+            sort(set_B.begin(),set_B.end(),[](const InterData& lhv, const InterData& rhv){ return lhv.index<rhv.index;});
+            const auto out_size = set_B.size();
+            int dims_2d[2] = {int(out_size),4};
+            int dims_1d[1] = {int(out_size)};
+            TensorShape  outshape0;
+            TensorShape  outshape1;
+            Tensor      *output_box         = NULL;
+            Tensor      *output_classes     = NULL;
+            Tensor      *output_index = NULL;
+
+            TensorShapeUtils::MakeShape(dims_2d, 2, &outshape0);
+            TensorShapeUtils::MakeShape(dims_1d, 1, &outshape1);
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_box));
+            OP_REQUIRES_OK(context, context->allocate_output(1, outshape1, &output_classes));
+            OP_REQUIRES_OK(context, context->allocate_output(2, outshape1, &output_index));
+
+            auto obox     = output_box->template flat<T>();
+            auto oclasses = output_classes->template flat<int32>();
+            auto oindex   = output_index->template flat<int32>();
+
+            for(auto j=0; j<out_size; ++j) {
+                const auto i = set_B[j].index;
+                auto box = bottom_box_flat.data()+i*4;
+                std::copy(box,box+4,obox.data()+4*j);
+                oclasses(j) = bottom_classes_flat(i);
+                oindex(j) = i;
+                ++j;
+            }
+        }
+    private:
+        float threshold    = 0.2;
+        float delta        = 2.0;
+        bool  classes_wise = true;
+};
+REGISTER_KERNEL_BUILDER(Name("BoxesSoftNms").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesSoftNmsOp<CPUDevice, float>);
+/*
  * 与BoxesNms的主要区别为BoxesNmsNr使用输出人数来进行处理
  * 要求数据已经按重要呈度从0到data_nr排好了序(从大到小）
  * bottom_box:[X,4](ymin,xmin,ymax,xmax)

@@ -1,5 +1,7 @@
-TF_INC = $(shell python -c 'import tensorflow as tf; print(tf.sysconfig.get_include())')
-TF_LIB = $(shell python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib())')
+#TF_INC = $(shell python -c 'import tensorflow as tf; print(tf.sysconfig.get_include())')
+TF_INC = "/home/vghost/.local/lib/python3.6/site-packages/tensorflow/include"
+#TF_LIB = $(shell python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib())')
+TF_LIB = "/home/vghost/.local/lib/python3.6/site-packages/tensorflow"
 all: clean build
 #g++ -std=c++14 -shared -g -o $@ $^ -I $(TF_INC) -fPIC -D_GLIBCXX_USE_CXX11_ABI=0 -L${TF_LIB} -ltensorflow_framework 
 

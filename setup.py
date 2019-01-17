@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 from __future__ import print_function
 from distutils.core import setup
 from distutils.command.install import install as DistutilsInstall
