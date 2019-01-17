@@ -335,7 +335,6 @@ class BoxesSoftNmsOp: public OpKernel {
                 auto box = bottom_box_flat.data()+i*4;
                 std::copy(box,box+4,obox.data()+4*j);
                 oclasses(j) = bottom_classes_flat(i);
-                cout<<i<<","<<set_B[j].score<<endl;
                 oindex(j) = i;
             }
         }
