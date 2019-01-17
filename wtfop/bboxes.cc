@@ -288,6 +288,7 @@ class BoxesSoftNmsOp: public OpKernel {
 
             for(auto i=0; i<data_nr; ++i) {
                 set_D[i].index = i;
+                set_D[i].score = confidence_flat.data()[i];
             }
             set_B.reserve(data_nr);
 
@@ -334,8 +335,8 @@ class BoxesSoftNmsOp: public OpKernel {
                 auto box = bottom_box_flat.data()+i*4;
                 std::copy(box,box+4,obox.data()+4*j);
                 oclasses(j) = bottom_classes_flat(i);
+                cout<<i<<","<<set_B[j].score<<endl;
                 oindex(j) = i;
-                ++j;
             }
         }
     private:
