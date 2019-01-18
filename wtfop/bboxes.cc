@@ -781,10 +781,13 @@ REGISTER_OP("BoxesEncode")
 	.Output("output_scores:T")
 	.Output("remove_indict:bool")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
-            auto                         shape0 = c->input(0);
-            shape_inference::ShapeHandle shape1;
+            const auto input_shape0 = c->input(0);
+            const auto input_shape1 = c->input(1);
+            const auto batch_size = c->Dim(input_shape1,0);
+            const auto boxes_nr  = c->Dim(input_shape0,1);
+            auto shape0 = c->MakeShape({batch_size,boxes_nr,4});
+            auto shape1 = c->MakeShape({batch_size,boxes_nr});
 
-            c->Subshape(shape0,0,2,&shape1);
 			c->set_output(0, shape0);
             for(auto i=1; i<4; ++i)
 			    c->set_output(i, shape1);

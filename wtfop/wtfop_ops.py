@@ -14,6 +14,7 @@ ops.NotDifferentiable("BoxesMatch")
 ops.NotDifferentiable("SetValue")
 ops.NotDifferentiable("SparseMaskToDense")
 ops.NotDifferentiable("PositionEmbedding")
+ops.NotDifferentiable("BoxesSoftNms")
 
 module_path = os.path.realpath(__file__)
 module_dir = os.path.dirname(module_path)
