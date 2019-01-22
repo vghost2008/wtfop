@@ -763,6 +763,7 @@ REGISTER_KERNEL_BUILDER(Name("EBoxesNms").Device(DEVICE_CPU).TypeConstraint<floa
  * bottom_boxes:[1,X,4]/[batch_size,X,4](ymin,xmin,ymax,xmax) 候选box,相对坐标
  * bottom_gboxes:[batch_size,Y,4](ymin,xmin,ymax,xmax)ground truth box相对坐标
  * bottom_glabels:[batch_size,Y] 0为背景
+ * bottom_glength:[batch_size] 为每一个batch中gboxes的有效数量
  * output_boxes:[batch_size,X,4] regs(cy,cx,h,w)
  * output_labels:[batch_size,X], 当前anchorbox的标签，背景为0,不为背景时为相应最大jaccard得分
  * output_scores:[batch_size,X], 当前anchorbox与groundtruthbox的jaccard得分，当jaccard得分高于threshold时就不为背影

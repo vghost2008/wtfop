@@ -244,7 +244,7 @@ class BoxesEncodeUnit {
 				}
 
 				/*
-				 * 计算所有正样本proposal box到所对应的ground truth box的回归参数
+				 * 计算所有正样本gbox到所对应的box的回归参数
 				 */
 				for(auto j=0; j<data_nr; ++j) {
 					auto  outbox  = out_boxes.chip(j,0);
