@@ -123,7 +123,6 @@ class WTFOPTest(tf.test.TestCase):
             np_labels = np.array([1,2,3,4])
             np_boxes = np.array([[0.0, 0.0, 0.2, 0.1], [0.0, 0.0, 0.2, 0.2], [0.101, 0.1, 0.44, 0.4], [0.73, 0.71, 0.91, 0.81],
                                  [0.7, 0.1, 0.9, 0.5], [0.3, 0.481, 0.5, 0.7]])
-            np_lens = np.array([np_labels.shape[0]])
             gboxes = tf.constant(np_gboxes,dtype=tf.float32)
             glabels = tf.constant(np_labels);
             boxes = tf.constant(np_boxes,dtype=tf.float32)
