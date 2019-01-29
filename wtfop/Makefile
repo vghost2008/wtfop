@@ -9,7 +9,7 @@ build: wtfop.so
 
 wtfop.so: wtfop.cc bboxes.cc wtoolkit.cc nlp.cc dentalfilm.cc
 	echo $^
-	g++ -std=c++14 -Wno-unused-result -shared -g -o $@ $^ -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC -L${TF_LIB} -ltensorflow_framework 
+	g++ -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared -g -o $@ $^ -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC -L${TF_LIB} -ltensorflow_framework 
 
 clean:
 	rm -f *.o *.so *.pyc *.npy
