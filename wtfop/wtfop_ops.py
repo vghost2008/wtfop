@@ -15,6 +15,7 @@ ops.NotDifferentiable("SetValue")
 ops.NotDifferentiable("SparseMaskToDense")
 ops.NotDifferentiable("PositionEmbedding")
 ops.NotDifferentiable("BoxesSoftNms")
+ops.NotDifferentiable("LabelType")
 
 module_path = os.path.realpath(__file__)
 module_dir = os.path.dirname(module_path)
@@ -67,6 +68,12 @@ def boxes_nms_nr(bboxes, classes, k=128,max_loop=5,classes_wise=True):
         classes = tf.cast(classes,tf.int32)
     out = wtfop_module.boxes_nms_nr(bottom_box=bboxes,classes=classes,k=k,max_loop=max_loop,classes_wise=classes_wise)
     return out[0],out[1],tf.cast(out[2],tf.int32)
+
+def label_type(bboxes, labels, expand=0.01,super_box_type=68):
+    if labels.dtype != tf.int32:
+        labels = tf.cast(labels,tf.int32)
+    out = wtfop_module.label_type(bboxes=bboxes,labels=labels,expand=expand,super_box_type=super_box_type)
+    return out
 
 @ops.RegisterGradient("BoxesNmsNr")
 def _boxes_nms_nr_grad(op, grad, _,_0):

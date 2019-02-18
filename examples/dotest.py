@@ -1,6 +1,6 @@
 #coding=utf-8
 import tensorflow as tf
-from wtfop.wtfop_ops import boxes_soft_nms,crop_boxes,boxes_encode,decode_boxes1,boxes_encode1
+from wtfop.wtfop_ops import boxes_soft_nms,crop_boxes,boxes_encode,decode_boxes1,boxes_encode1,label_type
 import object_detection.npod_toolkit as npod
 import numpy as np
 import random
@@ -157,6 +157,55 @@ class WTFOPTest(tf.test.TestCase):
                                          [0.6999999,0.7,0.9,0.8],
                                          [0.3,0.3,0.5,0.6]])
             self.assertAllClose(a=out_new_boxes,b=target_new_boxes,atol=1e-5,rtol=0.)
+
+    def testLabelType(self):
+        text = []
+        for i in range(ord('a'), ord('z') + 1):
+            text.append(chr(i))
+        for i in range(ord('A'), ord('Z') + 1):
+            text.append(chr(i))
+        for i in range(ord('0'), ord('9') + 1):
+            text.append(chr(i))
+        text.append('/')
+        text.append('\\')
+        text.append('-')
+        text.append('+')
+        text.append(":")
+        text.append("WORD")
+        text_to_id = {}
+        for i, t in enumerate(text):
+            text_to_id[t] = i + 1
+        def string_to_ids(v):
+            res = []
+            for c in v:
+                res.append(text_to_id[c])
+            return res
+        def make_bboxes(ids):
+            w = 1.
+            h  = 2.;
+            res = []
+            for i in range(len(ids)):
+                res.append([0.,w*i,h,w*(i+1)])
+            res.append([0.,0.,h,w*(len(ids))])
+            return np.array(res)
+        test_data=[
+           "Ki-67","kI-67","ER","er","Her-2","HER-2","HP","hp",
+            "k-67","eir","hr-","hhpp",
+        ]
+        expected_data=[0,0,1,1,2,2,3,3,0,1,2,3]
+        t_bboxes = tf.placeholder(dtype=tf.float32,shape=[None,4])
+        t_labels = tf.placeholder(dtype=tf.int32,shape=[None])
+        t_type = label_type(bboxes=t_bboxes,labels=t_labels)
+        with self.test_session() as sess:
+            for i,data in enumerate(test_data):
+                print(i)
+                ids = string_to_ids(data)
+                bboxes = make_bboxes(ids)
+                ids.append(68)
+                type = sess.run(t_type,feed_dict={t_bboxes:bboxes,t_labels:ids})
+                print(test_data[i],type)
+                self.assertAllEqual(type,np.array([expected_data[i]]))
+
 
 if __name__ == "__main__":
     random.seed(int(time.time()))
