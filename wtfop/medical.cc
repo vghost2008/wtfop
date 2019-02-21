@@ -52,8 +52,8 @@ class LabelTypeOp: public OpKernel {
                 target_type_data_.emplace_back(string_to_ids(str));
                 auto& data = target_type_data_.back();
                 tolower(data);
-                transform(data.begin(),data.end(),data.begin(),[](int v){ return v+1;});
             }
+            assert(super_box_type_>=raw_text_data_.size());
 		}
 
 		void Compute(OpKernelContext* context) override
@@ -72,10 +72,21 @@ class LabelTypeOp: public OpKernel {
                 if(labels(i) != super_box_type_)continue;
                 super_boxes.emplace_back(expand_bbox(bboxes.chip(i,0)));
             }
-			TensorShape  outshape;
-			Tensor      *output_type = nullptr;
-			int          dims_1d[1]  = {1};
+            show_superbboxes(super_boxes);
+            super_boxes = merge_super_bboxes(super_boxes);
+            show_superbboxes(super_boxes);
+            auto         is_h        = is_horizontal_text(super_boxes);
+            TensorShape  outshape;
+            Tensor      *output_type = nullptr;
+            int          dims_1d[1]  = {1};
 			TensorShapeUtils::MakeShape(dims_1d, 1, &outshape);
+            if(is_h) {
+                cout<<"H:"<<endl;
+                sort(super_boxes.begin(),super_boxes.end(),[](const bbox_t& lhv,const bbox_t& rhv) { return lhv[0]<rhv[0];});
+            } else {
+                cout<<"V:"<<endl;
+                sort(super_boxes.begin(),super_boxes.end(),[](const bbox_t& lhv,const bbox_t& rhv) { return lhv[1]<rhv[1];});
+            }
 
 			OP_REQUIRES_OK(context, context->allocate_output(0, outshape, &output_type));
 
@@ -89,12 +100,14 @@ class LabelTypeOp: public OpKernel {
 			vector<int>    bboxes_type;
             bbox_iou.reserve(super_boxes.size());
             bboxes_type.reserve(data_nr);
+           
 
             for(auto i=0; i<data_nr; ++i) {
                 bbox_iou.clear();
                 const bbox_t cur_bbox = bboxes.chip(i,0);
                 for(auto sbbox:super_boxes) {
-                    bbox_iou.emplace_back(bboxes_jaccardv1(sbbox,cur_bbox));
+                    //bbox_iou.emplace_back(bboxes_jaccardv1(sbbox,cur_bbox));
+                    bbox_iou.emplace_back(iou(sbbox,cur_bbox,is_h));
                 }
                 bboxes_type.emplace_back(distance(bbox_iou.begin(),max_element(bbox_iou.begin(),bbox_iou.end())));
             }
@@ -108,9 +121,7 @@ class LabelTypeOp: public OpKernel {
                     }
                 }
                 if(cur_bboxes.empty())continue;
-                const auto w = sbbox(3)-sbbox(1);
-                const auto h = sbbox(2)-sbbox(0);
-                if(w>h) {
+                if(is_h) {
                     sort(cur_bboxes.begin(),cur_bboxes.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
                         return lhv.first(1)<rhv.first(1);
                     });
@@ -130,9 +141,80 @@ class LabelTypeOp: public OpKernel {
                 type_data[0] = -1;
             }
 		}
+        void show_superbboxes(const vector<bbox_t>& bboxes,float h=256.0f,float w=256.0f) {
+            cout<<"{";
+            for(auto& box:bboxes) {
+                cout<<bbox_to_str(box)<<endl;
+            }
+            cout<<"}"<<endl;
+        }
+        string bbox_to_str(const bbox_t& box) {
+                stringstream ss;
+                ss<<"("<<box(0)<<","<<box(1)<<","<<box(2)<<","<<box(3)<<")";
+                return ss.str();
+        }
+        float iou(const bbox_t& lhv,const bbox_t& rhv,bool is_h) {
+            float union_v = 0.0;
+            float int_v = 0.0;
+            if(is_h) {
+                union_v = max(rhv(2),lhv(2))-min(rhv(0),lhv(0));
+                int_v = min(rhv(2),lhv(2))-max(rhv(0),lhv(0));
+            } else {
+                union_v = max(rhv(3),lhv(3))-min(rhv(1),lhv(1));
+                int_v = min(rhv(3),lhv(3))-max(rhv(1),lhv(1));
+            }
+            if((int_v<0) || (union_v<0))
+                return 0.0f;
+            return int_v/union_v;
+        }
+        inline bool is_horizontal_text(const vector<bbox_t>& boxes) {
+            vector<int> is_hors(boxes.size());
+            transform(boxes.begin(),boxes.end(),is_hors.begin(),is_horizontal);
+            return accumulate(is_hors.begin(),is_hors.end(),0)>(boxes.size()/2);
+
+        }
+        static inline bool is_horizontal(const bbox_t& box) {
+            return (box(3)-box(1))>(box(2)-box(0));
+        }
+        bbox_t merge_bbox(const bbox_t& lhv,const bbox_t& rhv) {
+            auto ymin = std::min(lhv(0),rhv(0));
+            auto xmin = std::min(lhv(1),rhv(1));
+            auto ymax = std::max(lhv(2),rhv(2));
+            auto xmax = std::max(lhv(3),rhv(3));
+            float data[] = {ymin,xmin,ymax,xmax};
+            cout<<"Merge:"<<bbox_to_str(lhv)<<","<<bbox_to_str(rhv)<<endl;
+            return Eigen::TensorMap<bbox_t>(data,4);
+        }
+        vector<bbox_t> merge_super_bboxes(const vector<bbox_t>& bboxes) {
+            return _merge_super_bboxes(_merge_super_bboxes(bboxes));
+        }
+
+        vector<bbox_t> _merge_super_bboxes(const vector<bbox_t>& bboxes) {
+            if(bboxes.size() == 1) 
+                return bboxes;
+            auto pend = prev(bboxes.end());
+            vector<bbox_t> res;
+            vector<bool> mask(bboxes.size(),true);
+            for(auto i=0; i<bboxes.size(); ++i) {
+                if(mask[i] == false) continue;
+                auto box = bboxes[i];
+                auto is_h = is_horizontal(box);
+                for(auto j=i+1; j<bboxes.size(); ++j) {
+                    auto rbox = bboxes[j];
+                    auto ris_h = is_horizontal(rbox);
+                    if((is_h == ris_h) && (bboxes_jaccardv1(box,rbox)>1e-8)) {
+                        box = merge_bbox(box,rbox);
+                        mask[j] = false;
+                    }
+                }
+                res.push_back(box);
+            }
+            return res;
+        }
         pair<int,float> get_type(const vector<bbox_info_t>& box_info) {
             vector<int> ids(box_info.size());
             transform(box_info.begin(),box_info.end(),ids.begin(),[](const bbox_info_t& v){ return v.second;});
+            cout<<"Text:"<<ids_to_string(ids)<<endl;
             tolower(ids);
             pair<int,float> res{-1,-1.0};
             for(auto i=0; i<target_type_data_.size(); ++i) {
@@ -225,8 +307,15 @@ class LabelTypeOp: public OpKernel {
                 if(pos == string::npos) {
                     res.push_back(-1);
                 } else {
-                    res.push_back(pos);
+                    res.push_back(pos+1);
                 }
+            }
+            return res;
+        }
+        string ids_to_string(const vector<int>& ids) {
+            string res;
+            for(auto id:ids) {
+                res.push_back(raw_text_data_[id-1]);
             }
             return res;
         }

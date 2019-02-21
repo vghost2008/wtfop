@@ -1,3 +1,4 @@
 {
-  "examples/dotest.py": true
+  "examples/dotest.py": true,
+  "examples/dotest.py::WTFOPTest::testLabelType": true
 }
