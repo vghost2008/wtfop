@@ -44,6 +44,31 @@ auto bboxes_jaccardv1(const T0& box0, const T1& box1)
 
 	return int_vol/union_vol;
 }
+template<typename T0,typename T1>
+auto bboxes_jaccardv2(const T0& box0, const T1& box1,bool is_h)
+{
+    if(is_h) {
+        const auto int_ymin    =  std::max(box0(0),box1(0));
+        const auto int_ymax    =  std::min(box0(2),box1(2));
+        const auto union_ymin  =  std::min(box0(0),box1(0));
+        const auto union_ymax  =  std::max(box0(2),box1(2));
+        const auto int_h       =  std::max<float>(int_ymax-int_ymin,0.);
+        const auto union_h     =  union_ymax-union_ymin;
+        if(union_h<1e-8)
+            return 0.0f;
+        return int_h/union_h;
+    } else {
+        const auto int_xmin    =  std::max(box0(1),box1(1));
+        const auto int_xmax    =  std::min(box0(3),box1(3));
+        const auto union_xmin  =  std::min(box0(1),box1(1));
+        const auto union_xmax  =  std::max(box0(3),box1(3));
+        const auto int_w       =  std::max<float>(int_xmax-int_xmin,0.);
+        const auto union_w     =  union_xmax-union_xmin;
+        if(union_w<1e-8)
+            return 0.0f;
+        return int_w/union_w;
+    }
+}
 /*
  * box:(ymin,xmin,ymax,xmax)
  * 仅计算两个交叉的box的交叉面积占box0的百分比

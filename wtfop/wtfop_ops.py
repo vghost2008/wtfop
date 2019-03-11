@@ -73,7 +73,7 @@ def label_type(bboxes, labels, expand=0.01,super_box_type=68):
     if labels.dtype != tf.int32:
         labels = tf.cast(labels,tf.int32)
     out = wtfop_module.label_type(bboxes=bboxes,labels=labels,expand=expand,super_box_type=super_box_type)
-    return out
+    return out[0],out[1]
 
 @ops.RegisterGradient("BoxesNmsNr")
 def _boxes_nms_nr_grad(op, grad, _,_0):

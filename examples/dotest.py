@@ -190,9 +190,9 @@ class WTFOPTest(tf.test.TestCase):
             return np.array(res)
         test_data=[
            "Ki-67","kI-67","ER","er","Her-2","HER-2","HP","hp",
-            "k-67","eir","hr-","hhpp",
+            "k-67","eir","hr-","hhpp","89K-67","PHX80718"
         ]
-        expected_data=[0,0,1,1,2,2,4,4,0,1,2,4]
+        expected_data=[0,0,1,1,2,2,4,4,0,1,2,4,0,4]
         t_bboxes = tf.placeholder(dtype=tf.float32,shape=[None,4])
         t_labels = tf.placeholder(dtype=tf.int32,shape=[None])
         t_type = label_type(bboxes=t_bboxes,labels=t_labels)

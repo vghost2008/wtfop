@@ -32,8 +32,10 @@ REGISTER_OP("LabelType")
     .Input("bboxes: T")
     .Input("labels: int32")
 	.Output("type:int32")
+	.Output("text:int32")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
 			c->set_output(0, c->Vector(1));
+			c->set_output(1, c->Vector(-1));
 			return Status::OK();
 			});
 
@@ -47,27 +49,30 @@ class LabelTypeOp: public OpKernel {
 			OP_REQUIRES_OK(context, context->GetAttr("expand", &expand_));
 			OP_REQUIRES_OK(context, context->GetAttr("super_box_type", &super_box_type_));
             raw_text_data_ = get_raw_text_data();
-            string target_type_string[] = {"Ki-67","ER","Her-2","PR","HP"};
-            for(auto& str:target_type_string) {
-                target_type_data_.emplace_back(string_to_ids(str));
-                auto& data = target_type_data_.back();
+            string target_type_string[] = {"Ki-67","ER","Her-2","PR","HP","Ki67","Her2"};
+            int types[] = {0,1,2,3,4,0,2};
+            for(auto i=0; i<7; ++i) {
+                auto& str = target_type_string[i];
+                target_type_data_.emplace_back(string_to_ids(str),types[i]);
+                auto& data = target_type_data_.back().first;
                 tolower(data);
             }
             assert(super_box_type_>=raw_text_data_.size());
 		}
 
 		void Compute(OpKernelContext* context) override
-		{
-			const Tensor &_bboxes = context->input(0);
-			const Tensor &_labels = context->input(1);
-			auto          bboxes  = _bboxes.template tensor<T,2>();
-			auto          labels  = _labels.template tensor<int,1>();
+        {
+            const Tensor &_bboxes = context->input(0);
+            const Tensor &_labels = context->input(1);
+            auto          bboxes  = _bboxes.template tensor<T,2>();
+            auto          labels  = _labels.template tensor<int,1>();
 
-			OP_REQUIRES(context, _bboxes.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
-			OP_REQUIRES(context, _labels.dims() == 1, errors::InvalidArgument("labels data must be 1-dimensional"));
+            OP_REQUIRES(context, _bboxes.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
+            OP_REQUIRES(context, _labels.dims() == 1, errors::InvalidArgument("labels data must be 1-dimensional"));
 
-			const auto     data_nr              = _bboxes.dim_size(0);
-			vector<bbox_t> super_boxes;
+            const auto     data_nr              = _bboxes.dim_size(0);
+            vector<bbox_t> super_boxes;
+            list<vector<int>> res_texts;
             for(auto i=0; i<data_nr; ++i) {
                 if(labels(i) != super_box_type_)continue;
                 super_boxes.emplace_back(expand_bbox(bboxes.chip(i,0)));
@@ -75,11 +80,7 @@ class LabelTypeOp: public OpKernel {
             show_superbboxes(super_boxes);
             super_boxes = merge_super_bboxes(super_boxes);
             show_superbboxes(super_boxes);
-            auto         is_h        = is_horizontal_text(super_boxes);
-            TensorShape  outshape;
-            Tensor      *output_type = nullptr;
-            int          dims_1d[1]  = {1};
-			TensorShapeUtils::MakeShape(dims_1d, 1, &outshape);
+            auto         is_h        = is_horizontal_text(super_boxes,bboxes);
             if(is_h) {
                 cout<<"H:"<<endl;
                 sort(super_boxes.begin(),super_boxes.end(),[](const bbox_t& lhv,const bbox_t& rhv) { return lhv[0]<rhv[0];});
@@ -88,19 +89,16 @@ class LabelTypeOp: public OpKernel {
                 sort(super_boxes.begin(),super_boxes.end(),[](const bbox_t& lhv,const bbox_t& rhv) { return lhv[1]<rhv[1];});
             }
 
-			OP_REQUIRES_OK(context, context->allocate_output(0, outshape, &output_type));
 
-            auto type_data = output_type->flat<int>().data();
-
-            if(super_boxes.size() == 0) {
-                type_data[0] = -1;
+            if(data_nr-super_boxes.size() == 0) {
+                make_default_return(context);
                 return;
             }
             vector<float> bbox_iou;
-			vector<int>    bboxes_type;
+            vector<int>    bboxes_type;
             bbox_iou.reserve(super_boxes.size());
             bboxes_type.reserve(data_nr);
-           
+
 
             for(auto i=0; i<data_nr; ++i) {
                 bbox_iou.clear();
@@ -109,7 +107,12 @@ class LabelTypeOp: public OpKernel {
                     //bbox_iou.emplace_back(bboxes_jaccardv1(sbbox,cur_bbox));
                     bbox_iou.emplace_back(iou(sbbox,cur_bbox,is_h));
                 }
-                bboxes_type.emplace_back(distance(bbox_iou.begin(),max_element(bbox_iou.begin(),bbox_iou.end())));
+                if(bbox_iou.empty()) continue;
+                auto it = max_element(bbox_iou.begin(),bbox_iou.end());
+                if(*it < 0.1)
+                    bboxes_type.emplace_back(-1);
+                else
+                    bboxes_type.emplace_back(distance(bbox_iou.begin(),it));
             }
             pair<int,float> type_info={-1,-1.0};
             for(auto i=0; i<super_boxes.size(); ++i) {
@@ -123,24 +126,99 @@ class LabelTypeOp: public OpKernel {
                 if(cur_bboxes.empty())continue;
                 if(is_h) {
                     sort(cur_bboxes.begin(),cur_bboxes.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
-                        return lhv.first(1)<rhv.first(1);
-                    });
+                            return lhv.first(1)<rhv.first(1);
+                            });
                 } else {
                     sort(cur_bboxes.begin(),cur_bboxes.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
-                        return lhv.first(0)<rhv.first(0);
-                    });
+                            return lhv.first(0)>rhv.first(0);
+                            });
                 }
-                auto tmp_type_info = get_type(cur_bboxes);
+                auto ids = get_ids(cur_bboxes);
+                res_texts.push_back(ids);
+                auto tmp_type_info = get_type(ids);
                 if(tmp_type_info.second>type_info.second)
                     type_info = tmp_type_info;
             }
-
-            if(type_info.second>1e-5) {
-                type_data[0] = type_info.first;
-            } else {
-                type_data[0] = -1;
+            /*
+               process type of -1
+             */
+            for(auto i=0; i<bboxes_type.size(); ++i) {
+                if(bboxes_type[i] != -1) continue;
+                vector<bbox_info_t> cur_bboxes;
+                cur_bboxes.emplace_back(bboxes.chip(i,0),labels(i));
+                for(auto j=i+1; j<bboxes_type.size(); ++j) {
+                    if(bboxes_type[j] != -1) continue;
+                    auto scores = iou(bboxes.chip(i,0),bboxes.chip(j,0),is_h);
+                    if(scores>0.3) {
+                        bboxes_type[j] = 0;
+                        cur_bboxes.emplace_back(bboxes.chip(j,0),labels(j));
+                    }
+                }
+                if(cur_bboxes.size()<2)continue;
+                if(is_h) {
+                    sort(cur_bboxes.begin(),cur_bboxes.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
+                            return lhv.first(1)<rhv.first(1);
+                            });
+                } else {
+                    sort(cur_bboxes.begin(),cur_bboxes.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
+                            return lhv.first(0)>rhv.first(0);
+                            });
+                }
+                auto ids = get_ids(cur_bboxes);
+                res_texts.push_back(ids);
+                auto tmp_type_info = get_type(ids);
+                if(tmp_type_info.second>type_info.second)
+                    type_info = tmp_type_info;
             }
-		}
+            if(type_info.second>1e-5) {
+                make_return(context,res_texts,type_info.first);
+            } else {
+                make_return(context,res_texts,-1);
+            }
+        }
+        void make_return(OpKernelContext* context,const list<vector<int>>& texts,int type) 
+        {
+            vector<int> datas;
+            for(auto& t:texts) {
+                datas.insert(datas.end(),t.begin(),t.end());
+                datas.push_back(0);
+            }
+
+            TensorShape  outshape0;
+            TensorShape  outshape1;
+            Tensor      *output_type = nullptr;
+            Tensor      *output_text = nullptr;
+            int          dims_1d0[1]  = {1};
+            int          dims_1d1[1]  = {datas.size()};
+            TensorShapeUtils::MakeShape(dims_1d0, 1, &outshape0);
+            TensorShapeUtils::MakeShape(dims_1d1, 1, &outshape1);
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_type));
+            OP_REQUIRES_OK(context, context->allocate_output(1, outshape1, &output_text));
+
+            auto type_data = output_type->flat<int>().data();
+            auto text_data = output_text->flat<int>().data();
+
+            type_data[0] = type;
+            for(auto i=0; i<datas.size(); ++i)
+                text_data[i] = datas[i];
+        }
+        void make_default_return(OpKernelContext* context)
+        {
+            TensorShape  outshape;
+            Tensor      *output_type = nullptr;
+            Tensor      *output_text = nullptr;
+            int          dims_1d[1]  = {1};
+            TensorShapeUtils::MakeShape(dims_1d, 1, &outshape);
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape, &output_type));
+            OP_REQUIRES_OK(context, context->allocate_output(1, outshape, &output_text));
+
+            auto type_data = output_type->flat<int>().data();
+            auto text_data = output_text->flat<int>().data();
+
+            type_data[0] = -1;
+            text_data[0] = 0;
+        }
         void show_superbboxes(const vector<bbox_t>& bboxes,float h=256.0f,float w=256.0f) {
             cout<<"{";
             for(auto& box:bboxes) {
@@ -157,22 +235,52 @@ class LabelTypeOp: public OpKernel {
             float union_v = 0.0;
             float int_v = 0.0;
             if(is_h) {
-                union_v = max(rhv(2),lhv(2))-min(rhv(0),lhv(0));
+                //union_v = max(rhv(2),lhv(2))-min(rhv(0),lhv(0));
+                union_v = min(rhv(2)-rhv(0),lhv(2)-lhv(0));
                 int_v = min(rhv(2),lhv(2))-max(rhv(0),lhv(0));
             } else {
-                union_v = max(rhv(3),lhv(3))-min(rhv(1),lhv(1));
+                //union_v = max(rhv(3),lhv(3))-min(rhv(1),lhv(1));
+                union_v = min(rhv(3)-rhv(1),lhv(3)-lhv(1));
                 int_v = min(rhv(3),lhv(3))-max(rhv(1),lhv(1));
             }
             if((int_v<0) || (union_v<0))
                 return 0.0f;
             return int_v/union_v;
         }
-        inline bool is_horizontal_text(const vector<bbox_t>& boxes) {
-            vector<int> is_hors(boxes.size());
-            transform(boxes.begin(),boxes.end(),is_hors.begin(),is_horizontal);
-            return accumulate(is_hors.begin(),is_hors.end(),0)>(boxes.size()/2);
-
-        }
+        template<typename TT>
+            inline bool is_horizontal_text(const vector<bbox_t>& boxes,const TT& bboxes) {
+                if(!boxes.empty()) {
+                    vector<int> is_hors(boxes.size());
+                    transform(boxes.begin(),boxes.end(),is_hors.begin(),is_horizontal);
+                    return accumulate(is_hors.begin(),is_hors.end(),0)>(boxes.size()/2);
+                } else {
+                    int h_words_nr = 0;
+                    int v_words_nr = 0;
+                    const auto data_nr = bboxes.dimension(0);
+                    vector<bool> h_mask(data_nr,false);
+                    vector<bool> v_mask(data_nr,false);
+                    for(auto i=0; i<data_nr; ++i) {
+                        if(!h_mask[i]) {
+                            h_words_nr += 1;
+                            for(auto j=i+1; j<data_nr; ++j) {
+                                if((!h_mask[j]) && (iou(bboxes.chip(i,0),bboxes.chip(j,0),true)>0.5)) {
+                                       h_mask[j] = true;
+                                }
+                            }
+                        }
+                        if(!v_mask[i]) {
+                            v_words_nr += 1;
+                            for(auto j=i+1; j<data_nr; ++j) {
+                                if((!v_mask[j]) && (iou(bboxes.chip(i,0),bboxes.chip(j,0),true)>0.5)) {
+                                    v_mask[j] = true;
+                                }
+                            }
+                        }
+                    }
+                    cout<<__func__<<":"<<(h_words_nr<v_words_nr);
+                    return h_words_nr<v_words_nr;
+                }
+            }
         static inline bool is_horizontal(const bbox_t& box) {
             return (box(3)-box(1))>(box(2)-box(0));
         }
@@ -202,7 +310,7 @@ class LabelTypeOp: public OpKernel {
                 for(auto j=i+1; j<bboxes.size(); ++j) {
                     auto rbox = bboxes[j];
                     auto ris_h = is_horizontal(rbox);
-                    if((is_h == ris_h) && (bboxes_jaccardv1(box,rbox)>1e-8)) {
+                    if((is_h == ris_h) && (bboxes_jaccardv2(box,rbox,is_h)>0.143)) {
                         box = merge_bbox(box,rbox);
                         mask[j] = false;
                     }
@@ -211,16 +319,20 @@ class LabelTypeOp: public OpKernel {
             }
             return res;
         }
-        pair<int,float> get_type(const vector<bbox_info_t>& box_info) {
+        inline vector<int> get_ids(const vector<bbox_info_t>& box_info) {
             vector<int> ids(box_info.size());
             transform(box_info.begin(),box_info.end(),ids.begin(),[](const bbox_info_t& v){ return v.second;});
+            return ids;
+        }
+        pair<int,float> get_type(vector<int>& ids) {
             cout<<"Text:"<<ids_to_string(ids)<<endl;
             tolower(ids);
             pair<int,float> res{-1,-1.0};
             for(auto i=0; i<target_type_data_.size(); ++i) {
-                auto score = match(ids,target_type_data_[i]);
+                auto& type_data = target_type_data_[i];
+                auto score = match(ids,type_data.first);
                 if(score>res.second) {
-                    res = make_pair(i,score);
+                    res = make_pair(type_data.second,score);
                 }
             }
             return res;
@@ -268,9 +380,8 @@ class LabelTypeOp: public OpKernel {
                     match_nr = tmp_match_nr;
             }
             if(d21.size()>0) {
-                auto tmp_res_score = match_nr*2.0/d21.size();
-                if(tmp_res_score>res_score)
-                    res_score = tmp_res_score;
+                auto tmp_res_score = match_nr*1.0/d21.size();
+                res_score += tmp_res_score;
             }
             return res_score;
         }
@@ -348,7 +459,7 @@ class LabelTypeOp: public OpKernel {
 	private:
 		float expand_         = 0.;
 		int   super_box_type_ = 0;
-        vector<vector<int>> target_type_data_;
+        vector<pair<vector<int>,int>> target_type_data_;
         string raw_text_data_;
 };
 REGISTER_KERNEL_BUILDER(Name("LabelType").Device(DEVICE_CPU).TypeConstraint<float>("T"), LabelTypeOp<CPUDevice, float>);
