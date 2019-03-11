@@ -15,9 +15,11 @@
 #include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/util/work_sharder.h"
 #include "bboxes.h"
+#include <boost/algorithm/string/split.hpp>
 
 using namespace tensorflow;
 using namespace std;
+namespace ba=boost::algorithm;
 typedef Eigen::ThreadPoolDevice CPUDevice;
 /*
  * 
@@ -25,39 +27,27 @@ typedef Eigen::ThreadPoolDevice CPUDevice;
  * labels:[Nr]
  * type:[1]
  */
-REGISTER_OP("LabelType")
+REGISTER_OP("MergeCharacter")
     .Attr("T: {float, double,int32}")
 	.Attr("expand:float")
 	.Attr("super_box_type:int")
     .Input("bboxes: T")
     .Input("labels: int32")
-	.Output("type:int32")
 	.Output("text:int32")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
-			c->set_output(0, c->Vector(1));
-			c->set_output(1, c->Vector(-1));
+			c->set_output(0, c->Vector(-1));
 			return Status::OK();
 			});
 
 template <typename Device, typename T>
-class LabelTypeOp: public OpKernel {
+class MergeCharacterOp: public OpKernel {
     public:
             using bbox_t = Eigen::Tensor<T,1,Eigen::RowMajor>;
             using bbox_info_t = pair<bbox_t,int>;
 	public:
-		explicit LabelTypeOp(OpKernelConstruction* context) : OpKernel(context) {
+		explicit MergeCharacterOp(OpKernelConstruction* context) : OpKernel(context) {
 			OP_REQUIRES_OK(context, context->GetAttr("expand", &expand_));
 			OP_REQUIRES_OK(context, context->GetAttr("super_box_type", &super_box_type_));
-            raw_text_data_ = get_raw_text_data();
-            string target_type_string[] = {"Ki-67","ER","Her-2","PR","HP","Ki67","Her2"};
-            int types[] = {0,1,2,3,4,0,2};
-            for(auto i=0; i<7; ++i) {
-                auto& str = target_type_string[i];
-                target_type_data_.emplace_back(string_to_ids(str),types[i]);
-                auto& data = target_type_data_.back().first;
-                tolower(data);
-            }
-            assert(super_box_type_>=raw_text_data_.size());
 		}
 
 		void Compute(OpKernelContext* context) override
@@ -104,7 +94,6 @@ class LabelTypeOp: public OpKernel {
                 bbox_iou.clear();
                 const bbox_t cur_bbox = bboxes.chip(i,0);
                 for(auto sbbox:super_boxes) {
-                    //bbox_iou.emplace_back(bboxes_jaccardv1(sbbox,cur_bbox));
                     bbox_iou.emplace_back(iou(sbbox,cur_bbox,is_h));
                 }
                 if(bbox_iou.empty()) continue;
@@ -114,7 +103,6 @@ class LabelTypeOp: public OpKernel {
                 else
                     bboxes_type.emplace_back(distance(bbox_iou.begin(),it));
             }
-            pair<int,float> type_info={-1,-1.0};
             for(auto i=0; i<super_boxes.size(); ++i) {
                 const auto sbbox = super_boxes.at(i);
                 vector<bbox_info_t> cur_bboxes;
@@ -135,9 +123,6 @@ class LabelTypeOp: public OpKernel {
                 }
                 auto ids = get_ids(cur_bboxes);
                 res_texts.push_back(ids);
-                auto tmp_type_info = get_type(ids);
-                if(tmp_type_info.second>type_info.second)
-                    type_info = tmp_type_info;
             }
             /*
                process type of -1
@@ -166,17 +151,10 @@ class LabelTypeOp: public OpKernel {
                 }
                 auto ids = get_ids(cur_bboxes);
                 res_texts.push_back(ids);
-                auto tmp_type_info = get_type(ids);
-                if(tmp_type_info.second>type_info.second)
-                    type_info = tmp_type_info;
             }
-            if(type_info.second>1e-5) {
-                make_return(context,res_texts,type_info.first);
-            } else {
-                make_return(context,res_texts,-1);
-            }
+            make_return(context,res_texts);
         }
-        void make_return(OpKernelContext* context,const list<vector<int>>& texts,int type) 
+        void make_return(OpKernelContext* context,const list<vector<int>>& texts) 
         {
             vector<int> datas;
             for(auto& t:texts) {
@@ -185,38 +163,27 @@ class LabelTypeOp: public OpKernel {
             }
 
             TensorShape  outshape0;
-            TensorShape  outshape1;
-            Tensor      *output_type = nullptr;
             Tensor      *output_text = nullptr;
-            int          dims_1d0[1]  = {1};
-            int          dims_1d1[1]  = {datas.size()};
+            int          dims_1d0[1]  = {datas.size()};
             TensorShapeUtils::MakeShape(dims_1d0, 1, &outshape0);
-            TensorShapeUtils::MakeShape(dims_1d1, 1, &outshape1);
-            OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_type));
-            OP_REQUIRES_OK(context, context->allocate_output(1, outshape1, &output_text));
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_text));
 
-            auto type_data = output_type->flat<int>().data();
             auto text_data = output_text->flat<int>().data();
 
-            type_data[0] = type;
             for(auto i=0; i<datas.size(); ++i)
                 text_data[i] = datas[i];
         }
         void make_default_return(OpKernelContext* context)
         {
             TensorShape  outshape;
-            Tensor      *output_type = nullptr;
             Tensor      *output_text = nullptr;
             int          dims_1d[1]  = {1};
             TensorShapeUtils::MakeShape(dims_1d, 1, &outshape);
 
-            OP_REQUIRES_OK(context, context->allocate_output(0, outshape, &output_type));
-            OP_REQUIRES_OK(context, context->allocate_output(1, outshape, &output_text));
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape, &output_text));
 
-            auto type_data = output_type->flat<int>().data();
             auto text_data = output_text->flat<int>().data();
 
-            type_data[0] = -1;
             text_data[0] = 0;
         }
         void show_superbboxes(const vector<bbox_t>& bboxes,float h=256.0f,float w=256.0f) {
@@ -324,15 +291,106 @@ class LabelTypeOp: public OpKernel {
             transform(box_info.begin(),box_info.end(),ids.begin(),[](const bbox_info_t& v){ return v.second;});
             return ids;
         }
+
+        bbox_t expand_bbox(const bbox_t& v) {
+            auto h = v(2)-v(0);
+            auto w = v(3)-v(1);
+            const auto delta = expand_/2.0f;
+            if(w>h) {
+                float data[] = {v(0),v(1)-delta,v(2),v(3)+delta};
+                return Eigen::TensorMap<bbox_t>(data,4);
+            } else {
+                float data[] = {v(0)-delta,v(1),v(2)+delta,v(3)};
+                return Eigen::TensorMap<bbox_t>(data,4);
+            }
+        }
+	private:
+		float expand_         = 0.;
+		int   super_box_type_ = 0;
+};
+REGISTER_KERNEL_BUILDER(Name("MergeCharacter").Device(DEVICE_CPU).TypeConstraint<float>("T"), MergeCharacterOp<CPUDevice, float>);
+/*
+ * id从1开始编号
+ * targets:[Y]目标类型的集合，使用0为分隔符
+ * texts:[X]待匹配的字符串集合，以0为分隔符
+ * output:type:[1] 匹配的类型，或为-1表示无法匹配 
+ */
+REGISTER_OP("MachWords")
+    .Attr("T: {int32,float, double,int32}")
+	.Input("targets:T")
+    .Input("texts: T")
+	.Output("type:int32")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+			c->set_output(0, c->Vector(1));
+			return Status::OK();
+			});
+
+template <typename Device, typename T>
+class MachWordsOp: public OpKernel {
+    public:
+            using bbox_t = Eigen::Tensor<T,1,Eigen::RowMajor>;
+            using bbox_info_t = pair<bbox_t,int>;
+	public:
+		explicit MachWordsOp(OpKernelConstruction* context) : OpKernel(context) {
+		}
+        template<typename TI,typename TO>
+            static void split(TI& lhv,const TO& rhv) {
+                vector<T> datas;
+                datas.reserve(rhv.dimension(0));
+                for(auto i=0; i<rhv.dimension(0); ++i)
+                    datas.push_back(rhv(i));
+                ba::split(lhv,datas,[](auto v) { return v==0; },ba::token_compress_on);
+                auto it = remove_if(lhv.begin(),lhv.end(),[](auto v){return v.empty();});
+                lhv.erase(it,lhv.end());
+            }
+
+		void Compute(OpKernelContext* context) override
+        {
+            const Tensor &_targets= context->input(0);
+            const Tensor &_texts= context->input(1);
+            auto          targets= _targets.template flat<T>();
+            auto          texts= _texts.template flat<T>();
+            vector<vector<int>> rtexts;
+
+            OP_REQUIRES(context, _targets.dims() == 1, errors::InvalidArgument("targets data must be 1-dimensional"));
+            OP_REQUIRES(context, _texts.dims() == 1, errors::InvalidArgument("texts data must be 1-dimensional"));
+            split(target_type_data_,targets);
+            for(auto& v:target_type_data_)
+                tolower(v);
+            split(rtexts,texts);
+
+            pair<int,float> type_info={-1,-1.0};
+            for(auto& text:rtexts) {
+                auto tmp_type_info = get_type(text);
+                if(tmp_type_info.second>type_info.second)
+                    type_info = tmp_type_info;
+            }
+            if(type_info.second>0.5) {
+                make_return(context,type_info.first);
+            } else {
+                make_return(context,-1);
+            }
+        }
+        void make_return(OpKernelContext* context,int type) 
+        {
+            TensorShape  outshape0;
+            Tensor      *output_type = nullptr;
+            int          dims_1d0[1]  = {1};
+            TensorShapeUtils::MakeShape(dims_1d0, 1, &outshape0);
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_type));
+
+            auto type_data = output_type->flat<int>().data();
+
+            type_data[0] = type;
+        }
         pair<int,float> get_type(vector<int>& ids) {
-            cout<<"Text:"<<ids_to_string(ids)<<endl;
             tolower(ids);
             pair<int,float> res{-1,-1.0};
             for(auto i=0; i<target_type_data_.size(); ++i) {
                 auto& type_data = target_type_data_[i];
-                auto score = match(ids,type_data.first);
+                auto score = match(ids,type_data);
                 if(score>res.second) {
-                    res = make_pair(type_data.second,score);
+                    res = make_pair(i,score);
                 }
             }
             return res;
@@ -410,19 +468,6 @@ class LabelTypeOp: public OpKernel {
                 return Eigen::TensorMap<bbox_t>(data,4);
             }
         }
-        vector<int> string_to_ids(const string& str) {
-            vector<int> res;
-            res.reserve(str.size());
-            for(auto c:str) {
-                auto pos = raw_text_data_.find(c);
-                if(pos == string::npos) {
-                    res.push_back(-1);
-                } else {
-                    res.push_back(pos+1);
-                }
-            }
-            return res;
-        }
         string ids_to_string(const vector<int>& ids) {
             string res;
             for(auto id:ids) {
@@ -459,7 +504,7 @@ class LabelTypeOp: public OpKernel {
 	private:
 		float expand_         = 0.;
 		int   super_box_type_ = 0;
-        vector<pair<vector<int>,int>> target_type_data_;
+        vector<vector<int>> target_type_data_;
         string raw_text_data_;
 };
-REGISTER_KERNEL_BUILDER(Name("LabelType").Device(DEVICE_CPU).TypeConstraint<float>("T"), LabelTypeOp<CPUDevice, float>);
+REGISTER_KERNEL_BUILDER(Name("MachWords").Device(DEVICE_CPU).TypeConstraint<int>("T"), MachWordsOp<CPUDevice, int>);
