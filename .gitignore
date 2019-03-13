@@ -3,6 +3,8 @@
 *.so
 *.so.dSYM
 *.swp
+*.o
+*.O
 *~
 __pycache__
 .idea
