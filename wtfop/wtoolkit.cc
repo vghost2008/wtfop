@@ -186,3 +186,51 @@ class RandomRange: public OpKernel {
 		int phy_max_;
 };
 REGISTER_KERNEL_BUILDER(Name("RandomRange").Device(DEVICE_CPU), RandomRange);
+
+/*
+ * 将输入的整数按指定的方式进行映射
+ */
+REGISTER_OP("IntHash")
+	.Attr("T:{int32,int64}")
+	.Attr("key:list(int)")
+	.Attr("value:list(int)")
+    .Input("input:T")
+	.Output("output:T")
+    .SetShapeFn(shape_inference::UnchangedShape);
+
+template <typename Device, typename T>
+class IntHash: public OpKernel {
+	public:
+		explicit IntHash(OpKernelConstruction* context) : OpKernel(context) {
+            vector<int> key;
+            vector<int> value;
+			OP_REQUIRES_OK(context, context->GetAttr("key", &key));
+			OP_REQUIRES_OK(context, context->GetAttr("value", &value));
+            const auto nr = std::min(key.size(),value.size());
+            for(auto i=0; i<nr; ++i)
+                dict_[key[i]] = value[i];
+		}
+
+		void Compute(OpKernelContext* context) override
+        {
+            const Tensor &_input = context->input(0);
+            Tensor      *output_tensor0 = nullptr;
+
+            OP_REQUIRES_OK(context,context->allocate_output(0,_input.shape(),&output_tensor0));
+
+            auto input  = _input.flat<T>();
+            auto output = output_tensor0->flat<T>();
+
+            for(auto i=0; i<input.size(); ++i) {
+                const auto v = input.data()[i];
+                const auto it = dict_.find(v);
+                if(it != dict_.end()) 
+                    output.data()[i] = it->second;
+                else
+                    output.data()[i] = 65536;
+            }
+        }
+	private:
+		map<int,int> dict_;
+};
+REGISTER_KERNEL_BUILDER(Name("IntHash").Device(DEVICE_CPU).TypeConstraint<int>("T"), IntHash<CPUDevice, int>);
