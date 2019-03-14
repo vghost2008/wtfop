@@ -16,6 +16,7 @@ ops.NotDifferentiable("SparseMaskToDense")
 ops.NotDifferentiable("PositionEmbedding")
 ops.NotDifferentiable("BoxesSoftNms")
 ops.NotDifferentiable("LabelType")
+ops.NotDifferentiable("IntHash")
 
 module_path = os.path.realpath(__file__)
 module_dir = os.path.dirname(module_path)
@@ -213,6 +214,10 @@ def random_range(max,hint,phy_max):
         hint = tf.cast(hint,tf.int32)
     out = wtfop_module.random_range(max=max,hint=hint,phy_max=phy_max)
     return out[0],out[1] 
+
+def int_hash(input,key,value):
+    out = wtfop_module.int_hash(input=input,key=key,value=value)
+    return out
 
 @ops.RegisterGradient("RoiPooling")
 def _roi_pool_grad(op, grad, _):

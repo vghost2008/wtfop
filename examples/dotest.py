@@ -1,6 +1,6 @@
 #coding=utf-8
 import tensorflow as tf
-from wtfop.wtfop_ops import boxes_soft_nms,crop_boxes,boxes_encode,decode_boxes1,boxes_encode1,label_type
+from wtfop.wtfop_ops import boxes_soft_nms,crop_boxes,boxes_encode,decode_boxes1,boxes_encode1,int_hash
 import object_detection.npod_toolkit as npod
 import numpy as np
 import random
@@ -158,7 +158,7 @@ class WTFOPTest(tf.test.TestCase):
                                          [0.3,0.3,0.5,0.6]])
             self.assertAllClose(a=out_new_boxes,b=target_new_boxes,atol=1e-5,rtol=0.)
 
-    def testLabelType(self):
+    '''def testLabelType(self):
         text = []
         for i in range(ord('a'), ord('z') + 1):
             text.append(chr(i))
@@ -204,8 +204,17 @@ class WTFOPTest(tf.test.TestCase):
                 ids.append(68)
                 type = sess.run(t_type,feed_dict={t_bboxes:bboxes,t_labels:ids})
                 print(test_data[i],type)
-                self.assertAllEqual(type,np.array([expected_data[i]]))
+                self.assertAllEqual(type,np.array([expected_data[i]]))'''
 
+    def testIntHash(self):
+        with self.test_session() as sess:
+            key = [1,3,4,5,6,7,8]
+            value = [3,3,9,1,10,99,88]
+            with self.test_session() as sess:
+                input = tf.constant(key)
+                out = int_hash(input,key,value)
+                out = sess.run(out)
+                self.assertAllEqual(out,value)
 
 if __name__ == "__main__":
     random.seed(int(time.time()))
