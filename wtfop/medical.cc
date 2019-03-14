@@ -67,9 +67,9 @@ class MergeCharacterOp: public OpKernel {
                 if(labels(i) != super_box_type_)continue;
                 super_boxes.emplace_back(expand_bbox(bboxes.chip(i,0)));
             }
-            show_superbboxes(super_boxes);
+            //show_superbboxes(super_boxes);
             super_boxes = merge_super_bboxes(super_boxes);
-            show_superbboxes(super_boxes);
+            //show_superbboxes(super_boxes);
             auto         is_h        = is_horizontal_text(super_boxes,bboxes);
             if(is_h) {
                 cout<<"H:"<<endl;
@@ -328,11 +328,11 @@ REGISTER_OP("MachWords")
 template <typename Device, typename T>
 class MachWordsOp: public OpKernel {
     public:
-            using bbox_t = Eigen::Tensor<T,1,Eigen::RowMajor>;
-            using bbox_info_t = pair<bbox_t,int>;
-	public:
-		explicit MachWordsOp(OpKernelConstruction* context) : OpKernel(context) {
-		}
+        using bbox_t = Eigen::Tensor<T,1,Eigen::RowMajor>;
+        using bbox_info_t = pair<bbox_t,int>;
+    public:
+        explicit MachWordsOp(OpKernelConstruction* context) : OpKernel(context) {
+        }
         template<typename TI,typename TO>
             static void split(TI& lhv,const TO& rhv) {
                 vector<T> datas;
@@ -344,7 +344,7 @@ class MachWordsOp: public OpKernel {
                 lhv.erase(it,lhv.end());
             }
 
-		void Compute(OpKernelContext* context) override
+        void Compute(OpKernelContext* context) override
         {
             const Tensor &_targets= context->input(0);
             const Tensor &_texts= context->input(1);
@@ -359,13 +359,16 @@ class MachWordsOp: public OpKernel {
                 tolower(v);
             split(rtexts,texts);
 
-            pair<int,float> type_info={-1,-1.0};
+            auto min_score = 1;
+            pair<int,int> type_info={-1,-1};
             for(auto& text:rtexts) {
                 auto tmp_type_info = get_type(text);
                 if(tmp_type_info.second>type_info.second)
                     type_info = tmp_type_info;
+                else if(tmp_type_info.second == type_info.second)
+                    min_score = type_info.second;
             }
-            if(type_info.second>0.5) {
+            if(type_info.second>min_score) {
                 make_return(context,type_info.first);
             } else {
                 make_return(context,-1);
@@ -383,7 +386,7 @@ class MachWordsOp: public OpKernel {
 
             type_data[0] = type;
         }
-        pair<int,float> get_type(vector<int>& ids) {
+        pair<int,int> get_type(vector<int>& ids) {
             tolower(ids);
             pair<int,float> res{-1,-1.0};
             for(auto i=0; i<target_type_data_.size(); ++i) {
@@ -398,48 +401,25 @@ class MachWordsOp: public OpKernel {
 
         float match(const vector<int>& source,const vector<int>& target) {
             auto d0 = split_ids(source,target.size());
+            const auto max_score = 100;
             for(const auto& d:d0) {
                 if(equal(d.begin(),d.end(),target.begin()))
-                    return 100.0+target.size();
+                    return max_score+target.size();
             }
+            if(target.size()<=2)
+                return 0;
             if(d0.empty())
                 d0.push_back(source);
-            float res_score = 0.0f;
-            auto d11 = split_ids(target,2);
-            float match_nr = 0.0f;
+            float res_score = 0;
             for(auto& d:d0) {
-                auto d10 = split_ids(d,2);
-                float tmp_match_nr = 0.0f;
-                for(auto sd10:d10) {
-                    for(auto&d1:d11) {
-                        if(equal(sd10.begin(),sd10.end(),d1.begin())) 
-                            tmp_match_nr += 1.0f;
-                    }
-                }
-                if(tmp_match_nr>match_nr)
-                    match_nr = tmp_match_nr;
-            }
-            if(d11.size()>0) {
-                res_score = match_nr*2.0/d11.size();
-            }
+                const auto cost = edit_distance(d.begin(),d.end(),target.begin(),target.end());
+                if(cost>target.size()-2)
+                    continue;
+                const auto score = max_score - cost;
+                if(score>res_score)
+                    res_score = score;
 
-            auto d21 = split_ids(target,1);
-            match_nr = 0.0f;
-            for(auto& d:d0) {
-                auto d10 = split_ids(d,1);
-                float tmp_match_nr = 0.0f;
-                for(auto sd10:d10) {
-                    for(auto&d1:d21) {
-                        if(equal(sd10.begin(),sd10.end(),d1.begin())) 
-                            tmp_match_nr += 1.0f;
-                    }
-                }
-                if(tmp_match_nr>match_nr)
-                    match_nr = tmp_match_nr;
-            }
-            if(d21.size()>0) {
-                auto tmp_res_score = match_nr*1.0/d21.size();
-                res_score += tmp_res_score;
+
             }
             return res_score;
         }
@@ -497,13 +477,28 @@ class MachWordsOp: public OpKernel {
         }
         void tolower(vector<int>& v) {
             transform(v.begin(),v.end(),v.begin(),[](int v) {
-                if((v>=26)&&(v<52)) return v-26;
-                return v;
-            });
+                    if((v>=26)&&(v<52)) return v-26;
+                    return v;
+                    });
         }
-	private:
-		float expand_         = 0.;
-		int   super_box_type_ = 0;
+        template<typename IT0,typename IT1>
+            int edit_distance(IT0 fbegin,IT0 fend,IT1 sbegin, IT1 send) {
+                auto fnr = distance(fbegin,fend);
+                auto snr = distance(sbegin,send);
+                const  auto cd = 1;
+                const  auto ci = 1;
+                const  auto cr = 1;
+                if(min(fnr,snr)==0) {
+                    return max(fnr,snr);
+                }
+                auto c0 = edit_distance(fbegin,prev(fend),sbegin,send)+cd;
+                auto c1 = edit_distance(fbegin,fend,sbegin,prev(send))+ci;
+                auto c2 = edit_distance(fbegin,prev(fend),sbegin,prev(send))+((*prev(fend)==*prev(send))?0:cr);
+                return min({c0,c1,c2});
+            }
+    private:
+        float expand_         = 0.;
+        int   super_box_type_ = 0;
         vector<vector<int>> target_type_data_;
         string raw_text_data_;
 };
