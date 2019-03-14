@@ -215,8 +215,8 @@ def random_range(max,hint,phy_max):
     out = wtfop_module.random_range(max=max,hint=hint,phy_max=phy_max)
     return out[0],out[1] 
 
-def int_hash(input,key,value):
-    out = wtfop_module.int_hash(input=input,key=key,value=value)
+def int_hash(input,table):
+    out = wtfop_module.int_hash(input=input,key=list(table.keys()),value=list(table.values()))
     return out
 
 @ops.RegisterGradient("RoiPooling")
