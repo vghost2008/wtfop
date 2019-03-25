@@ -114,7 +114,7 @@ class MergeCharacterOp: public OpKernel {
                     }
                 }
                 if(cur_bboxes.empty())continue;
-                if(is_h) {
+                if(is_horizontal(sbbox)) {
                     sort(cur_bboxes.begin(),cur_bboxes.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
                             return lhv.first(1)<rhv.first(1);
                             });
@@ -214,8 +214,8 @@ class MergeCharacterOp: public OpKernel {
                 return 0.0f;
             return int_v/union_v;
         }
-        float iou(const bbox_t& lhv,const bbox_t& rhv) {
-            return bboxes_jaccardv1(lhv,rhv);
+        float iou(const bbox_t& super_box,const bbox_t& bbox) {
+            return bboxes_jaccard_of_box0v1(bbox,super_box);
         }
         template<typename TT>
             inline bool is_horizontal_text(const vector<bbox_t>& boxes,const TT& bboxes) {
