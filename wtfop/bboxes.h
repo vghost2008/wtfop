@@ -89,6 +89,22 @@ T bboxes_jaccard_of_box0(const T* box0, const T* box1)
 
 	return int_vol/box0_vol;
 }
+template<typename T0,typename T1>
+auto bboxes_jaccard_of_box0v1(const T0& box0, const T1& box1)
+{
+	const auto int_ymin = std::max(box0(0),box1(0));
+	const auto int_xmin = std::max(box0(1),box1(1));
+	const auto int_ymax = std::min(box0(2),box1(2));
+	const auto int_xmax = std::min(box0(3),box1(3));
+	const auto int_h    = std::max<float>(int_ymax-int_ymin,0.);
+	const auto int_w    = std::max<float>(int_xmax-int_xmin,0.);
+	const auto int_vol  = int_h *int_w;
+	const auto box0_vol = (box0(2)-box0(0)) *(box0(3)-box0(1));
+
+	if(box0_vol<1E-6) return 0.0f;
+
+	return int_vol/box0_vol;
+}
 /*
  * box:ymin,xmin,ymax,xmax
  * return:cy,cx,h,w
