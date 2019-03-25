@@ -413,7 +413,7 @@ class MachWordsOp: public OpKernel {
             float res_score = 0;
             for(auto& d:d0) {
                 const auto cost = edit_distance(d.begin(),d.end(),target.begin(),target.end());
-                if(cost>target.size()-2)
+                if((cost>target.size()-2) || (cost>1))
                     continue;
                 const auto score = max_score - cost;
                 if(score>res_score)
