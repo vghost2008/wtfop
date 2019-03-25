@@ -85,23 +85,25 @@ class MergeCharacterOp: public OpKernel {
                 return;
             }
             vector<float> bbox_iou;
-            vector<int>    bboxes_type;
+            vector<int>    bboxes_type(size_t(data_nr),-1);
             bbox_iou.reserve(super_boxes.size());
-            bboxes_type.reserve(data_nr);
 
 
             for(auto i=0; i<data_nr; ++i) {
                 bbox_iou.clear();
                 const bbox_t cur_bbox = bboxes.chip(i,0);
                 for(auto sbbox:super_boxes) {
-                    bbox_iou.emplace_back(iou(sbbox,cur_bbox,is_h));
+                    if(is_horizontal(sbbox)==is_h)
+                        bbox_iou.emplace_back(iou(sbbox,cur_bbox,is_h));
+                    else
+                        bbox_iou.emplace_back(iou(sbbox,cur_bbox));
                 }
                 if(bbox_iou.empty()) continue;
                 auto it = max_element(bbox_iou.begin(),bbox_iou.end());
                 if(*it < 0.1)
-                    bboxes_type.emplace_back(-1);
+                    bboxes_type[i] = -1;
                 else
-                    bboxes_type.emplace_back(distance(bbox_iou.begin(),it));
+                    bboxes_type[i] = int(distance(bbox_iou.begin(),it));
             }
             for(auto i=0; i<super_boxes.size(); ++i) {
                 const auto sbbox = super_boxes.at(i);
@@ -202,17 +204,18 @@ class MergeCharacterOp: public OpKernel {
             float union_v = 0.0;
             float int_v = 0.0;
             if(is_h) {
-                //union_v = max(rhv(2),lhv(2))-min(rhv(0),lhv(0));
                 union_v = min(rhv(2)-rhv(0),lhv(2)-lhv(0));
                 int_v = min(rhv(2),lhv(2))-max(rhv(0),lhv(0));
             } else {
-                //union_v = max(rhv(3),lhv(3))-min(rhv(1),lhv(1));
                 union_v = min(rhv(3)-rhv(1),lhv(3)-lhv(1));
                 int_v = min(rhv(3),lhv(3))-max(rhv(1),lhv(1));
             }
             if((int_v<0) || (union_v<0))
                 return 0.0f;
             return int_v/union_v;
+        }
+        float iou(const bbox_t& lhv,const bbox_t& rhv) {
+            return bboxes_jaccardv1(lhv,rhv);
         }
         template<typename TT>
             inline bool is_horizontal_text(const vector<bbox_t>& boxes,const TT& bboxes) {
@@ -410,6 +413,8 @@ class MachWordsOp: public OpKernel {
                 return 0;
             if(d0.empty())
                 d0.push_back(source);
+            auto d1 = split_ids(source,target.size()+1);
+            copy(d1.begin(),d1.end(),back_inserter(d0));
             float res_score = 0;
             for(auto& d:d0) {
                 const auto cost = edit_distance(d.begin(),d.end(),target.begin(),target.end());
