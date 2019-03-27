@@ -67,9 +67,8 @@ class MergeCharacterOp: public OpKernel {
                 if(labels(i) != super_box_type_)continue;
                 super_boxes.emplace_back(expand_bbox(bboxes.chip(i,0)));
             }
-            //show_superbboxes(super_boxes);
             super_boxes = merge_super_bboxes(super_boxes);
-            //show_superbboxes(super_boxes);
+            finetune_super_boxes(super_boxes,bboxes,labels);
             auto         is_h        = is_horizontal_text(super_boxes,bboxes);
             if(is_h) {
                 cout<<"H:"<<endl;
@@ -90,8 +89,11 @@ class MergeCharacterOp: public OpKernel {
 
 
             for(auto i=0; i<data_nr; ++i) {
-                bbox_iou.clear();
+                if(labels(i) == super_box_type_) continue;
+
                 const bbox_t cur_bbox = bboxes.chip(i,0);
+
+                bbox_iou.clear();
                 for(auto sbbox:super_boxes) {
                     if(is_horizontal(sbbox)==is_h)
                         bbox_iou.emplace_back(iou(sbbox,cur_bbox,is_h));
@@ -99,7 +101,9 @@ class MergeCharacterOp: public OpKernel {
                         bbox_iou.emplace_back(iou(sbbox,cur_bbox));
                 }
                 if(bbox_iou.empty()) continue;
+
                 auto it = max_element(bbox_iou.begin(),bbox_iou.end());
+
                 if(*it < 0.1)
                     bboxes_type[i] = -1;
                 else
@@ -130,18 +134,18 @@ class MergeCharacterOp: public OpKernel {
                process type of -1
              */
             for(auto i=0; i<bboxes_type.size(); ++i) {
-                if(bboxes_type[i] != -1) continue;
+                if((bboxes_type[i] != -1) || (labels(i)==super_box_type_)) continue;
                 vector<bbox_info_t> cur_bboxes;
                 cur_bboxes.emplace_back(bboxes.chip(i,0),labels(i));
                 for(auto j=i+1; j<bboxes_type.size(); ++j) {
-                    if(bboxes_type[j] != -1) continue;
+                    if((bboxes_type[j] != -1) || (labels(j)==super_box_type_)) continue;
                     auto scores = iou(bboxes.chip(i,0),bboxes.chip(j,0),is_h);
                     if(scores>0.3) {
                         bboxes_type[j] = 0;
                         cur_bboxes.emplace_back(bboxes.chip(j,0),labels(j));
                     }
                 }
-                if(cur_bboxes.size()<2)continue;
+                if(cur_bboxes.size()<1)continue;
                 if(is_h) {
                     sort(cur_bboxes.begin(),cur_bboxes.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
                             return lhv.first(1)<rhv.first(1);
@@ -199,6 +203,50 @@ class MergeCharacterOp: public OpKernel {
                 stringstream ss;
                 ss<<"("<<box(0)<<","<<box(1)<<","<<box(2)<<","<<box(3)<<")";
                 return ss.str();
+        }
+        template<typename T0,typename T1>
+        void finetune_super_boxes(vector<bbox_t>& super_bboxes,const T0& bboxes,const T1& labels)
+        {
+            vector<bbox_info_t> super_boxes_info;
+            super_boxes_info.reserve(super_bboxes.size());
+
+            for(auto& sbox:super_bboxes) {
+                auto total_nr = 0;
+                for(auto i=0; i<bboxes.dimension(0); ++i) {
+                    if(labels(i) == super_box_type_) continue;
+                    if(bboxes_jaccard_of_box0v1((bbox_t)bboxes.chip(i,0),sbox)>0.3) 
+                        ++total_nr;
+                }
+                super_boxes_info.emplace_back(sbox,total_nr);
+            }
+            sort(super_boxes_info.begin(),super_boxes_info.end(),[](const auto& lhv,const auto& rhv) { return lhv.second>rhv.second;});
+            for(auto i=0; i<super_boxes_info.size(); ++i) {
+                auto& cur_box = super_boxes_info[i].first;
+                for(auto j=i+1; j<super_boxes_info.size(); ++j) {
+                    clip_box_by(cur_box,super_boxes_info[j].first);
+                }
+            }
+            super_bboxes.clear();
+            for(auto& info:super_boxes_info) {
+                if(box_sizev1(info.first)<1E-4) continue;
+                super_bboxes.push_back(info.first);
+            }
+        }
+        void clip_box_by(const bbox_t& ref_bbox,bbox_t& bbox) {
+            if(bboxes_jaccardv1(ref_bbox,bbox)<1e-2) return;
+            if(bboxes_jaccard_of_box0v1(bbox,ref_bbox)>=0.99) {
+                bbox(0)=bbox(1)=bbox(2)=bbox(3) = -1.0;
+                return;
+            }
+            if(bbox(1)<ref_bbox(1)) {
+                bbox(3) = std::min(bbox(3),ref_bbox(1));
+            } else if(bbox(3)>ref_bbox(3)) {
+                bbox(1) = std::max(bbox(1),ref_bbox(3));
+            } else if(bbox(0)<ref_bbox(0)) {
+                bbox(2) = std::min(bbox(2),ref_bbox(0));
+            } else if(bbox(2)>ref_bbox(2)) {
+                bbox(0) = std::max(bbox(0),ref_bbox(2));
+            }
         }
         float iou(const bbox_t& lhv,const bbox_t& rhv,bool is_h) {
             float union_v = 0.0;
