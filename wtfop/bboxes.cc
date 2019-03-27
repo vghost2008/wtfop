@@ -224,6 +224,110 @@ class BoxesNmsOp: public OpKernel {
 };
 REGISTER_KERNEL_BUILDER(Name("BoxesNms").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesNmsOp<CPUDevice, float>);
 /*
+ * 要求数据已经按重要呈度从0到data_nr排好了序(从大到小）
+ * bottom_box:[X,4](ymin,xmin,ymax,xmax)
+ * classes:[X]
+ * group:[Z,2]分组信息，分别为一个组里标签的开始与结束编号，不在分组信息的的默认为一个组
+ * output_box:[Y,4]
+ * output_classes:[Y]
+ * output_index:[Y]
+ * 输出时的相对位置不能改变
+ */
+REGISTER_OP("GroupBoxesNms")
+    .Attr("T: {float, double,int32}")
+	.Attr("threshold:float")
+    .Input("bottom_box: T")
+    .Input("classes: int32")
+    .Input("group: int32")
+	.Output("output_box:T")
+	.Output("output_classes:int32")
+	.Output("output_index:int32")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+			c->set_output(0, c->Matrix(-1, 4));
+			c->set_output(1, c->Vector(-1));
+			c->set_output(2, c->Vector(-1));
+			return Status::OK();
+			});
+
+template <typename Device, typename T>
+class GroupBoxesNmsOp: public OpKernel {
+	public:
+		explicit GroupBoxesNmsOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("threshold", &threshold));
+		}
+
+		void Compute(OpKernelContext* context) override
+		{
+			const Tensor &bottom_box          = context->input(0);
+			const Tensor &bottom_classes      = context->input(1);
+			const Tensor &_group              = context->input(2);
+			auto          bottom_box_flat     = bottom_box.flat<T>();
+			auto          bottom_classes_flat = bottom_classes.flat<int32>();
+			auto          group               = _group.template tensor<int,2>();
+
+			OP_REQUIRES(context, bottom_box.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
+			OP_REQUIRES(context, bottom_classes.dims() == 1, errors::InvalidArgument("classes data must be 1-dimensional"));
+			OP_REQUIRES(context, _group.dims() == 2, errors::InvalidArgument("group data must be 2-dimensional"));
+
+			const auto   data_nr           = bottom_box.dim_size(0);
+			vector<bool> keep_mask(data_nr,true);
+			const auto   loop_end          = data_nr-1;
+
+			for(auto i=0; i<loop_end; ++i) {
+				if(keep_mask[i]) {
+					const auto iclass = bottom_classes_flat(i);
+                    const auto igroup = get_group(group,iclass);
+					for(auto j=i+1; j<data_nr; ++j) {
+						if(igroup != get_group(group,bottom_classes_flat(j))) continue;
+						if(bboxes_jaccard(bottom_box_flat.data()+i*4,bottom_box_flat.data()+j*4) < threshold) continue;
+						keep_mask[j] = false;
+					}
+				}
+			}
+
+			const auto out_size = count(keep_mask.begin(),keep_mask.end(),true);
+			int dims_2d[2] = {int(out_size),4};
+			int dims_1d[1] = {int(out_size)};
+			TensorShape  outshape0;
+			TensorShape  outshape1;
+			Tensor      *output_box         = NULL;
+			Tensor      *output_classes     = NULL;
+			Tensor      *output_index = NULL;
+
+			TensorShapeUtils::MakeShape(dims_2d, 2, &outshape0);
+			TensorShapeUtils::MakeShape(dims_1d, 1, &outshape1);
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_box));
+			OP_REQUIRES_OK(context, context->allocate_output(1, outshape1, &output_classes));
+			OP_REQUIRES_OK(context, context->allocate_output(2, outshape1, &output_index));
+
+			auto obox     = output_box->template flat<T>();
+			auto oclasses = output_classes->template flat<int32>();
+			auto oindex   = output_index->template flat<int32>();
+
+			for(int i=0,j=0; i<data_nr; ++i) {
+				if(!keep_mask[i]) continue;
+				auto box = bottom_box_flat.data()+i*4;
+				std::copy(box,box+4,obox.data()+4*j);
+				oclasses(j) = bottom_classes_flat(i);
+				oindex(j) = i;
+				++j;
+			}
+		}
+        template<typename TM>
+        int get_group(const TM& group_data,int label)
+        {
+            for(auto i=0; i<group_data.dimension(0); ++i) {
+                if((label>=group_data(i,0)) && (label<=group_data(i,1)))
+                    return i;
+            }
+            return -1;
+        }
+	private:
+		float threshold    = 0.2;
+};
+REGISTER_KERNEL_BUILDER(Name("GroupBoxesNms").Device(DEVICE_CPU).TypeConstraint<float>("T"), GroupBoxesNmsOp<CPUDevice, float>);
+/*
  * 数据不需要排序
  * bottom_box:[X,4](ymin,xmin,ymax,xmax)
  * classes:[X]
