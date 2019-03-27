@@ -187,6 +187,10 @@ template<typename T>
 T box_size(const T* input) {
 	return (input[2]-input[0])*(input[3]-input[1]);
 }
+template<typename T>
+float box_sizev1(const T& input) {
+	return (input(2)-input(0))*(input(3)-input(1));
+}
 template <typename T>
 class BoxesEncodeUnit {
 	public:
