@@ -64,7 +64,7 @@ def slide_batch(data,filter,strides=None,padding="VALID"):
     out = wtfop_module.slide_batch(data=data,filter=filter,strides=strides,padding=padding)
     return out
 
-def boxes_nms_nr(bboxes, classes, k=128,max_loop=5,classes_wise=True):
+def boxes_nms_nr(bboxes, classes, confidence=None,k=128,max_loop=5,classes_wise=True):
     if classes.dtype != tf.int32:
         classes = tf.cast(classes,tf.int32)
     out = wtfop_module.boxes_nms_nr(bottom_box=bboxes,classes=classes,k=k,max_loop=max_loop,classes_wise=classes_wise)
@@ -122,10 +122,16 @@ def distored_qa(question,answer,expand_nr=2):
 def expand_tensor(tensor,expand_nr=2):
     out = wtfop_module.expand_tensor(tensor,expand_nr=expand_nr)
     return out
-def boxes_nms(bboxes, classes, threshold=0.45,classes_wise=True):
+def boxes_nms(bboxes, classes, threshold=0.45,confidence=None,classes_wise=True):
     if classes.dtype != tf.int32:
         classes = tf.cast(classes,tf.int32)
     out = wtfop_module.boxes_nms(bottom_box=bboxes,classes=classes,threshold=threshold,classes_wise=classes_wise)
+    return out[0],out[1],tf.cast(out[2],tf.int32)
+
+def group_boxes_nms(bboxes, classes, group,threshold=0.45,confidence=None):
+    if classes.dtype != tf.int32:
+        classes = tf.cast(classes,tf.int32)
+    out = wtfop_module.group_boxes_nms(bottom_box=bboxes,classes=classes,group=group,threshold=threshold)
     return out[0],out[1],tf.cast(out[2],tf.int32)
 
 def boxes_soft_nms(bboxes, classes, confidence,threshold=0.45,delta=0.5,classes_wise=True):
