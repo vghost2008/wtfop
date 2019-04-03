@@ -25,6 +25,7 @@ typedef Eigen::ThreadPoolDevice CPUDevice;
  * 
  * bbox:[Nr,4](y,x,h,w)
  * labels:[Nr]
+ * dlabels:[Nr]
  * type:[1]
  */
 REGISTER_OP("MergeCharacter")
@@ -33,6 +34,7 @@ REGISTER_OP("MergeCharacter")
 	.Attr("super_box_type:int")
     .Input("bboxes: T")
     .Input("labels: int32")
+    .Input("dlabels: int32")
 	.Output("text:int32")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
 			c->set_output(0, c->Vector(-1));
@@ -43,7 +45,7 @@ template <typename Device, typename T>
 class MergeCharacterOp: public OpKernel {
     public:
             using bbox_t = Eigen::Tensor<T,1,Eigen::RowMajor>;
-            using bbox_info_t = pair<bbox_t,int>;
+            using bbox_info_t = tuple<bbox_t,int,int>;
 	public:
 		explicit MergeCharacterOp(OpKernelConstruction* context) : OpKernel(context) {
 			OP_REQUIRES_OK(context, context->GetAttr("expand", &expand_));
@@ -52,13 +54,16 @@ class MergeCharacterOp: public OpKernel {
 
 		void Compute(OpKernelContext* context) override
         {
-            const Tensor &_bboxes = context->input(0);
-            const Tensor &_labels = context->input(1);
-            auto          bboxes  = _bboxes.template tensor<T,2>();
-            auto          labels  = _labels.template tensor<int,1>();
+            const Tensor &_bboxes  = context->input(0);
+            const Tensor &_labels  = context->input(1);
+            const Tensor &_dlabels = context->input(2);
+            auto          bboxes   = _bboxes.template tensor<T,2>();
+            auto          labels   = _labels.template tensor<int,1>();
+            auto          dlabels  = _dlabels.template tensor<int,1>();
 
             OP_REQUIRES(context, _bboxes.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
             OP_REQUIRES(context, _labels.dims() == 1, errors::InvalidArgument("labels data must be 1-dimensional"));
+            OP_REQUIRES(context, _dlabels.dims() == 1, errors::InvalidArgument("dlabels data must be 1-dimensional"));
 
             const auto     data_nr              = _bboxes.dim_size(0);
             vector<bbox_t> super_boxes;
@@ -71,10 +76,8 @@ class MergeCharacterOp: public OpKernel {
             finetune_super_boxes(super_boxes,bboxes,labels);
             auto         is_h        = is_horizontal_text(super_boxes,bboxes);
             if(is_h) {
-                cout<<"H:"<<endl;
                 sort(super_boxes.begin(),super_boxes.end(),[](const bbox_t& lhv,const bbox_t& rhv) { return lhv[0]<rhv[0];});
             } else {
-                cout<<"V:"<<endl;
                 sort(super_boxes.begin(),super_boxes.end(),[](const bbox_t& lhv,const bbox_t& rhv) { return lhv[1]<rhv[1];});
             }
 
@@ -83,10 +86,11 @@ class MergeCharacterOp: public OpKernel {
                 make_default_return(context);
                 return;
             }
+
             vector<float> bbox_iou;
             vector<int>    bboxes_type(size_t(data_nr),-1);
-            bbox_iou.reserve(super_boxes.size());
 
+            bbox_iou.reserve(super_boxes.size());
 
             for(auto i=0; i<data_nr; ++i) {
                 if(labels(i) == super_box_type_) continue;
@@ -109,24 +113,17 @@ class MergeCharacterOp: public OpKernel {
                 else
                     bboxes_type[i] = int(distance(bbox_iou.begin(),it));
             }
+
             for(auto i=0; i<super_boxes.size(); ++i) {
                 const auto sbbox = super_boxes.at(i);
                 vector<bbox_info_t> cur_bboxes;
                 for(auto j=0; j<data_nr; ++j) {
                     if((bboxes_type[j] == i) && (labels(j) != super_box_type_)) {
-                        cur_bboxes.emplace_back(bboxes.chip(j,0),labels(j));
+                        cur_bboxes.emplace_back(bboxes.chip(j,0),labels(j),dlabels(j));
                     }
                 }
                 if(cur_bboxes.empty())continue;
-                if(is_horizontal(sbbox)) {
-                    sort(cur_bboxes.begin(),cur_bboxes.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
-                            return lhv.first(1)<rhv.first(1);
-                            });
-                } else {
-                    sort(cur_bboxes.begin(),cur_bboxes.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
-                            return lhv.first(0)>rhv.first(0);
-                            });
-                }
+                sort_text_info(cur_bboxes);
                 auto ids = get_ids(cur_bboxes);
                 res_texts.push_back(ids);
             }
@@ -136,25 +133,17 @@ class MergeCharacterOp: public OpKernel {
             for(auto i=0; i<bboxes_type.size(); ++i) {
                 if((bboxes_type[i] != -1) || (labels(i)==super_box_type_)) continue;
                 vector<bbox_info_t> cur_bboxes;
-                cur_bboxes.emplace_back(bboxes.chip(i,0),labels(i));
+                cur_bboxes.emplace_back(bboxes.chip(i,0),labels(i),dlabels(i));
                 for(auto j=i+1; j<bboxes_type.size(); ++j) {
                     if((bboxes_type[j] != -1) || (labels(j)==super_box_type_)) continue;
                     auto scores = iou(bboxes.chip(i,0),bboxes.chip(j,0),is_h);
                     if(scores>0.3) {
                         bboxes_type[j] = 0;
-                        cur_bboxes.emplace_back(bboxes.chip(j,0),labels(j));
+                        cur_bboxes.emplace_back(bboxes.chip(j,0),labels(j),dlabels(j));
                     }
                 }
                 if(cur_bboxes.size()<1)continue;
-                if(is_h) {
-                    sort(cur_bboxes.begin(),cur_bboxes.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
-                            return lhv.first(1)<rhv.first(1);
-                            });
-                } else {
-                    sort(cur_bboxes.begin(),cur_bboxes.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
-                            return lhv.first(0)>rhv.first(0);
-                            });
-                }
+                sort_text_info(cur_bboxes);
                 auto ids = get_ids(cur_bboxes);
                 res_texts.push_back(ids);
             }
@@ -217,19 +206,19 @@ class MergeCharacterOp: public OpKernel {
                     if(bboxes_jaccard_of_box0v1((bbox_t)bboxes.chip(i,0),sbox)>0.3) 
                         ++total_nr;
                 }
-                super_boxes_info.emplace_back(sbox,total_nr);
+                super_boxes_info.emplace_back(sbox,total_nr,0);
             }
-            sort(super_boxes_info.begin(),super_boxes_info.end(),[](const auto& lhv,const auto& rhv) { return lhv.second>rhv.second;});
+            sort(super_boxes_info.begin(),super_boxes_info.end(),[](const auto& lhv,const auto& rhv) { return get<1>(lhv)>get<1>(rhv);});
             for(auto i=0; i<super_boxes_info.size(); ++i) {
-                auto& cur_box = super_boxes_info[i].first;
+                auto& cur_box = get<0>(super_boxes_info[i]);
                 for(auto j=i+1; j<super_boxes_info.size(); ++j) {
-                    clip_box_by(cur_box,super_boxes_info[j].first);
+                    clip_box_by(cur_box,get<0>(super_boxes_info[j]));
                 }
             }
             super_bboxes.clear();
             for(auto& info:super_boxes_info) {
-                if(box_sizev1(info.first)<1E-4) continue;
-                super_bboxes.push_back(info.first);
+                if(box_sizev1(get<0>(info))<1E-4) continue;
+                super_bboxes.push_back(get<0>(info));
             }
         }
         void clip_box_by(const bbox_t& ref_bbox,bbox_t& bbox) {
@@ -314,6 +303,38 @@ class MergeCharacterOp: public OpKernel {
         vector<bbox_t> merge_super_bboxes(const vector<bbox_t>& bboxes) {
             return _merge_super_bboxes(_merge_super_bboxes(bboxes));
         }
+        void sort_text_info(vector<bbox_info_t>& text_info) {
+            array<int,4> counts = {0,0,0,0};
+            for(auto& info:text_info)
+                ++counts[get<2>(info)];
+            cout<<"Count:{";
+            for(auto x:counts)
+                cout<<x<<",";
+            cout<<"}"<<endl;
+            const auto type = distance(counts.begin(),max_element(counts.begin(),counts.end()));
+            switch(type) {
+                case 0:
+                    sort(text_info.begin(),text_info.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
+                            return get<0>(lhv)(1)<get<0>(rhv)(1);
+                            });
+                    break;
+                case 1:
+                    sort(text_info.begin(),text_info.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
+                            return get<0>(lhv)(0)<get<0>(rhv)(0);
+                            });
+                    break;
+                case 2:
+                    sort(text_info.begin(),text_info.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
+                            return get<0>(lhv)(1)>get<0>(rhv)(1);
+                            });
+                    break;
+                case 3:
+                    sort(text_info.begin(),text_info.end(),[](const bbox_info_t& lhv,const bbox_info_t& rhv) {
+                            return get<0>(lhv)(0)>get<0>(rhv)(0);
+                            });
+                    break;
+            }
+        }
 
         vector<bbox_t> _merge_super_bboxes(const vector<bbox_t>& bboxes) {
             if(bboxes.size() == 1) 
@@ -339,7 +360,7 @@ class MergeCharacterOp: public OpKernel {
         }
         inline vector<int> get_ids(const vector<bbox_info_t>& box_info) {
             vector<int> ids(box_info.size());
-            transform(box_info.begin(),box_info.end(),ids.begin(),[](const bbox_info_t& v){ return v.second;});
+            transform(box_info.begin(),box_info.end(),ids.begin(),[](const bbox_info_t& v){ return get<1>(v);});
             return ids;
         }
 
