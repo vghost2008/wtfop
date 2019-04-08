@@ -334,6 +334,110 @@ class MergeCharacterOp: public OpKernel {
                             });
                     break;
             }
+            text_info = insert_space(text_info,type);
+        }
+        vector<bbox_info_t> insert_space(const vector<bbox_info_t>& text_info,int type) {
+            if(text_info.empty()) return text_info;
+            vector<bbox_info_t> res;
+            switch(type) {
+                case 0:
+                    {
+                        vector<float> values;
+                        transform(text_info.begin(),text_info.end(),back_inserter(values),[](const bbox_info_t& v) {
+                                return get<0>(v)[3]-get<0>(v)[1];
+                                });
+                        auto avg_width  = accumulate(values.begin(),values.end(),0.0f)/values.size();
+                        res.push_back(text_info.front());
+                        for(auto it=next(text_info.begin()); it!=text_info.end(); ++it) {
+                            auto jt = prev(it);
+                            const auto & b0 = get<0>(*it);
+                            const auto & b1 = get<0>(*jt);
+                            const auto count = int((b0(1)-b1(3))/avg_width+0.3f);
+                            if(count>0) {
+                                const auto dv = (b0(1)-b1(3))/count;
+                                for(auto i=0; i<count; ++i) {
+                                    T data[4] = {b1(0),b1(3)+dv*i,b1(2),b1(3)+dv*(i+1)};
+                                    res.emplace_back(Eigen::TensorMap<bbox_t>(data,4),69,type);
+                                }
+                            }
+                            res.push_back(*it);
+                        }
+                    }
+                    break;
+                case 2:
+                    {
+                        vector<float> values;
+                        transform(text_info.begin(),text_info.end(),back_inserter(values),[](const bbox_info_t& v) {
+                                return get<0>(v)[3]-get<0>(v)[1];
+                                });
+                        auto avg_width  = accumulate(values.begin(),values.end(),0.0f)/values.size();
+                        res.push_back(text_info.front());
+                        for(auto it=next(text_info.begin()); it!=text_info.end(); ++it) {
+                            auto jt = prev(it);
+                            const auto & b0 = get<0>(*it);
+                            const auto & b1 = get<0>(*jt);
+                            const auto count = int((b1(1)-b0(3))/avg_width+0.3f);
+                            if(count>0) {
+                                const auto dv = (b1(1)-b0(3))/count;
+                                for(auto i=0; i<count; ++i) {
+                                    T data[4] = {b0(0),b0(3)+dv*i,b0(2),b0(3)+dv*(i+1)};
+                                    res.emplace_back(Eigen::TensorMap<bbox_t>(data,4),69,type);
+                                }
+                            }
+                            res.push_back(*it);
+                        }
+                    }
+                    break;
+                 case 1:
+                    {
+                        vector<float> values;
+                        transform(text_info.begin(),text_info.end(),back_inserter(values),[](const bbox_info_t& v) {
+                                return get<0>(v)[2]-get<0>(v)[0];
+                                });
+                        auto avg_height = accumulate(values.begin(),values.end(),0.0f)/values.size();
+                        res.push_back(text_info.front());
+                        for(auto it=next(text_info.begin()); it!=text_info.end(); ++it) {
+                            auto jt = prev(it);
+                            const auto & b0 = get<0>(*it);
+                            const auto & b1 = get<0>(*jt);
+                            const auto count = int((b0(0)-b1(2))/avg_height+0.3f);
+                            if(count>0) {
+                                const auto dv = (b0(0)-b1(2))/count;
+                                for(auto i=0; i<count; ++i) {
+                                    T data[4] = {b1[2]+dv*i,b1[1],b1[2]+dv*(i+1),b1[3]};
+                                    res.emplace_back(Eigen::TensorMap<bbox_t>(data,4),69,type);
+                                }
+                            }
+                            res.push_back(*it);
+                        }
+                    }
+                    break;
+                 case 3:
+                    {
+                        vector<float> values;
+                        transform(text_info.begin(),text_info.end(),back_inserter(values),[](const bbox_info_t& v) {
+                                return get<0>(v)[2]-get<0>(v)[0];
+                                });
+                        auto avg_height = accumulate(values.begin(),values.end(),0.0f)/values.size();
+                        res.push_back(text_info.front());
+                        for(auto it=next(text_info.begin()); it!=text_info.end(); ++it) {
+                            auto jt = prev(it);
+                            const auto & b0 = get<0>(*it);
+                            const auto & b1 = get<0>(*jt);
+                            const auto count = int((b1(0)-b0(2))/avg_height+0.3f);
+                            if(count>0) {
+                                const auto dv = (b1(0)-b0(2))/count;
+                                for(auto i=0; i<count; ++i) {
+                                    T data[4] = {b0[2]+dv*i,b0[1],b0[2]+dv*(i+1),b0[3]};
+                                    res.emplace_back(Eigen::TensorMap<bbox_t>(data,4),69,type);
+                                }
+                            }
+                            res.push_back(*it);
+                        }
+                    }
+                    break;
+            }
+            return res;
         }
 
         vector<bbox_t> _merge_super_bboxes(const vector<bbox_t>& bboxes) {
