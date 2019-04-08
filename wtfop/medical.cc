@@ -508,6 +508,10 @@ class MachWordsOp: public OpKernel {
         using bbox_info_t = pair<bbox_t,int>;
     public:
         explicit MachWordsOp(OpKernelConstruction* context) : OpKernel(context) {
+            const string        trans_data       = "cijklopsuvwxz";
+            transform(trans_data.begin(),trans_data.end(),back_inserter(trans_indexs_),[](char c) {
+                return int(c)-int('a');
+            });
         }
         template<typename TI,typename TO>
             static void split(TI& lhv,const TO& rhv) {
@@ -654,8 +658,10 @@ class MachWordsOp: public OpKernel {
             return text_array;
         }
         void tolower(vector<int>& v) {
-            transform(v.begin(),v.end(),v.begin(),[](int v) {
-                    if((v>=26)&&(v<52)) return v-26;
+            auto need_trans = [this](int v) { return find(trans_indexs_.begin(),trans_indexs_.end(),v-27)!=trans_indexs_.end();};
+            transform(v.begin(),v.end(),v.begin(),[&need_trans](int v) { 
+                    if((v>=27)&&(v<53)&&need_trans(v))
+                        return v-26; 
                     return v;
                     });
         }
@@ -675,9 +681,10 @@ class MachWordsOp: public OpKernel {
                 return min({c0,c1,c2});
             }
     private:
-        float expand_         = 0.;
-        int   super_box_type_ = 0;
+        float               expand_           = 0.;
+        int                 super_box_type_   = 0;
         vector<vector<int>> target_type_data_;
-        string raw_text_data_;
+        string              raw_text_data_;
+        vector<int>         trans_indexs_;
 };
 REGISTER_KERNEL_BUILDER(Name("MachWords").Device(DEVICE_CPU).TypeConstraint<int>("T"), MachWordsOp<CPUDevice, int>);
