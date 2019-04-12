@@ -222,13 +222,14 @@ class BoxesEncodeUnit {
                 auto                  out_labels           = Eigen::Tensor<int,1,Eigen::RowMajor>(data_nr);
                 auto                  out_scores           = Eigen::Tensor<T,1,Eigen::RowMajor>(data_nr);
                 auto                  out_remove_indices   = Eigen::Tensor<bool,1,Eigen::RowMajor>(data_nr);
-                std::vector<int>      outindex(data_nr       ,-1);
+                auto                  outindex             = Eigen::Tensor<int,1,Eigen::RowMajor>(data_nr);
                 std::vector<bool>     is_max_score(data_nr   ,false);
                 std::vector<IOUIndex> iou_indexs(data_nr     ,IOUIndex({-1,0.0}));                          //默认box不与任何ground truth box相交，iou为0
 
 				for(auto i=0; i<data_nr; ++i) {
 					out_labels(i) = 0;  //默认所有的都为背景
 					out_scores(i) = 0;
+                    outindex(i) = -1;
 				}
 				/*
 				 * 遍历每一个ground truth box
@@ -262,9 +263,9 @@ class BoxesEncodeUnit {
 								|| (jaccard<out_scores(j)) 
 								|| is_max_score[j]) //不覆盖特殊情况
 							continue;
-						out_scores(j) = jaccard;
-						out_labels(j) = glabel;
-						outindex[j] = i;
+						out_scores(j)  =  jaccard;
+						out_labels(j)  =  glabel;
+						outindex(j)    =  i;
 					}
 					if(max_scores<1E-8) continue;
 					/*
@@ -275,7 +276,7 @@ class BoxesEncodeUnit {
 					if((out_scores(j) <= max_scores) || (!is_max_score[j])) {
 						out_scores(j) = max_scores;
 						out_labels(j) = glabel;
-						outindex[j] = i;
+						outindex(j) = i;
 						is_max_score[j] = true;
 					}
 				} //end for
@@ -303,7 +304,7 @@ class BoxesEncodeUnit {
 					auto &feat_h  = out_boxes(j,2);
 					auto &feat_w  = out_boxes(j,3);
 					Eigen::Tensor<T,1,Eigen::RowMajor> box     = boxes.chip(j,0);
-					Eigen::Tensor<T,1,Eigen::RowMajor> gbox    = gboxes.chip(outindex[j],0);
+					Eigen::Tensor<T,1,Eigen::RowMajor> gbox    = gboxes.chip(outindex(j),0);
 					auto  yxhw    = box_minmax_to_cxywh(box.data());
 					auto  yref    = std::get<0>(yxhw);
 					auto  xref    = std::get<1>(yxhw);
@@ -327,7 +328,7 @@ class BoxesEncodeUnit {
 					feat_h   =  log(feat_h/href)/prio_scaling_[2];
 					feat_w   =  log(feat_w/wref)/prio_scaling_[3];
 				}
-				return std::make_tuple(out_boxes,out_labels,out_scores,out_remove_indices);
+				return std::make_tuple(out_boxes,out_labels,out_scores,out_remove_indices,outindex);
 			}
 	private:
 		const float              pos_threshold_;
