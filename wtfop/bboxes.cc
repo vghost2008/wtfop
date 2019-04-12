@@ -871,6 +871,8 @@ REGISTER_KERNEL_BUILDER(Name("EBoxesNms").Device(DEVICE_CPU).TypeConstraint<floa
  * output_boxes:[batch_size,X,4] regs(cy,cx,h,w)
  * output_labels:[batch_size,X], 当前anchorbox的标签，背景为0,不为背景时为相应最大jaccard得分
  * output_scores:[batch_size,X], 当前anchorbox与groundtruthbox的jaccard得分，当jaccard得分高于threshold时就不为背影
+ * output_remove_indict:[batch_size,X], anchorbox是否有效(一般为iou处理中间部分的无效)
+ * output_indict:[batch_size,X], 当anchorbox有效时，与它对应的gboxes序号
  */
 REGISTER_OP("BoxesEncode")
     .Attr("T: {float,double,int32,int64}")
@@ -885,6 +887,7 @@ REGISTER_OP("BoxesEncode")
 	.Output("output_labels:int32")
 	.Output("output_scores:T")
 	.Output("remove_indict:bool")
+	.Output("indict:int32")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
             const auto input_shape0 = c->input(0);
             const auto input_shape1 = c->input(1);
@@ -894,7 +897,7 @@ REGISTER_OP("BoxesEncode")
             auto shape1 = c->MakeShape({batch_size,boxes_nr});
 
 			c->set_output(0, shape0);
-            for(auto i=1; i<4; ++i)
+            for(auto i=1; i<5; ++i)
 			    c->set_output(i, shape1);
 			return Status::OK();
 			});
@@ -935,6 +938,7 @@ class BoxesEncodeOp: public OpKernel {
 			Tensor       *output_labels         = NULL;
 			Tensor       *output_scores         = NULL;
 			Tensor       *output_remove_indict  = NULL;
+			Tensor       *output_indict         = NULL;
 
 			TensorShapeUtils::MakeShape(dims_3d, 3, &outshape0);
 			TensorShapeUtils::MakeShape(dims_2d, 2, &outshape1);
@@ -944,11 +948,13 @@ class BoxesEncodeOp: public OpKernel {
 			OP_REQUIRES_OK(context, context->allocate_output(1, outshape1, &output_labels));
 			OP_REQUIRES_OK(context, context->allocate_output(2, outshape1, &output_scores));
 			OP_REQUIRES_OK(context, context->allocate_output(3, outshape1, &output_remove_indict));
+			OP_REQUIRES_OK(context, context->allocate_output(4, outshape1, &output_indict));
 
-			auto output_boxes_tensor         = output_boxes->template tensor<T,3>();
-			auto output_labels_tensor        = output_labels->template tensor<int,2>();
-			auto output_scores_tensor        = output_scores->template tensor<T,2>();
-			auto output_remove_indict_tensor = output_remove_indict->template tensor<bool,2>();
+			auto output_boxes_tensor          =  output_boxes->template tensor<T,3>();
+			auto output_labels_tensor         =  output_labels->template tensor<int,2>();
+			auto output_scores_tensor         =  output_scores->template tensor<T,2>();
+			auto output_remove_indict_tensor  =  output_remove_indict->template tensor<bool,2>();
+			auto output_indict_tensor         =  output_indict->template tensor<int,2>();
 
             BoxesEncodeUnit<T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
             for(auto i=0; i<batch_size; ++i) {
@@ -967,12 +973,14 @@ class BoxesEncodeOp: public OpKernel {
                 auto out_labels         = output_labels_tensor.chip(i,0);
                 auto out_scores         = output_scores_tensor.chip(i,0);
                 auto out_remove_indices = output_remove_indict_tensor.chip(i,0);
+                auto out_indices        = output_indict_tensor.chip(i,0);
                 auto res                = encode_unit(boxes,gboxes,glabels);
 
                 out_boxes           =  std::get<0>(res);
                 out_labels          =  std::get<1>(res);
                 out_scores          =  std::get<2>(res);
                 out_remove_indices  =  std::get<3>(res);
+                out_indices         =  std::get<4>(res);
             }
 		}
 	private:
