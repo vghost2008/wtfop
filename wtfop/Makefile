@@ -1,6 +1,10 @@
 TF_INC = $(shell python -c 'import tensorflow as tf; print(tf.sysconfig.get_include())')
+#TF_INC = $(shell /home/wj/anaconda3_rl/bin/python -c 'import tensorflow as tf; print(tf.sysconfig.get_include())')
+#TF_INC = $(shell /home/wj/anaconda3_cpu/bin/python -c 'import tensorflow as tf; print(tf.sysconfig.get_include())')
 #TF_INC = "/home/vghost/.local/lib/python3.6/site-packages/tensorflow/include"
 TF_LIB = $(shell python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib())')
+#TF_LIB = $(shell /home/wj/anaconda3_rl/bin/python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib())')
+#TF_LIB = $(shell /home/wj/anaconda3_cpu/bin/python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib())')
 #TF_LIB = "/home/vghost/.local/lib/python3.6/site-packages/tensorflow"
 all: build
 #all: clean build

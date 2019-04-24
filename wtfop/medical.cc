@@ -580,7 +580,7 @@ class MachWordsOp: public OpKernel {
         }
 
         float match(const vector<int>& source,const vector<int>& target) {
-            auto d0 = split_ids(source,target.size());
+            auto d0 = target.size()>3?split_ids(source,target.size()):strict_split_ids(source,target.size());
             const auto max_score = 100;
             for(const auto& d:d0) {
                 if(equal(d.begin(),d.end(),target.begin()))
@@ -606,7 +606,7 @@ class MachWordsOp: public OpKernel {
             return res_score;
         }
 
-        list<vector<int>> split_ids(const vector<int>& v,size_t size) {
+        list<vector<int>> split_ids(const vector<int>& v,size_t size)const {
             list<vector<int>> res;
             if(v.size()<size) {
                 return res;
@@ -616,6 +616,36 @@ class MachWordsOp: public OpKernel {
                 res.push_back(vector<int>(it,next(it,size)));
             }
             return res;
+        }
+        list<vector<int>> strict_split_ids(const vector<int>& v,size_t size)const {
+            list<vector<int>> res;
+            if(v.size()<size) {
+                return res;
+            }
+            auto end=prev(v.end(),size-1);
+            auto pend=prev(end);
+            for(auto it = v.begin(); it!=end; ++it) {
+                auto eit = next(it,size);
+                if(size>1) {
+                    if((it != v.begin()) && (!good_split_point(*prev(it),*it)))
+                        continue;
+
+                    if((eit != pend) && (!good_split_point(*eit,*next(eit))))
+                        continue;
+                }
+                res.push_back(vector<int>(it,eit));
+            }
+            return res;
+        }
+        inline bool good_split_point(int lhv,int rhv)const {
+            auto get_char_type = [this](int v) {
+                if(need_trans_tolower(v)) return 0;
+                if((v>=1) && (v<27) && (find(trans_indexs_.begin(),trans_indexs_.end(),v-1) != trans_indexs_.end())) return 0;
+                if((v>=1) && (v<27)) return 1;
+                if((v>=27) &&(v<53)) return 2;
+                return v;
+            };
+            return get_char_type(lhv) != get_char_type(rhv);
         }
 
         bbox_t expand_bbox(const bbox_t& v) {
@@ -657,13 +687,19 @@ class MachWordsOp: public OpKernel {
 
             return text_array;
         }
-        void tolower(vector<int>& v) {
-            auto need_trans = [this](int v) { return find(trans_indexs_.begin(),trans_indexs_.end(),v-27)!=trans_indexs_.end();};
-            transform(v.begin(),v.end(),v.begin(),[&need_trans](int v) { 
-                    if((v>=27)&&(v<53)&&need_trans(v))
-                        return v-26; 
-                    return v;
+        void tolower(vector<int>& v)const {
+            transform(v.begin(),v.end(),v.begin(),[this](int v) { 
+                return tolower(v);
                     });
+        }
+        inline int tolower(int v)const {
+            if(need_trans_tolower(v))
+                return v-26; 
+            return v;
+        }
+        inline bool need_trans_tolower(int v)const {
+            if((v<27) || (v>=53)) return false;
+             return find(trans_indexs_.begin(),trans_indexs_.end(),v-27)!=trans_indexs_.end();
         }
         template<typename IT0,typename IT1>
             int edit_distance(IT0 fbegin,IT0 fend,IT1 sbegin, IT1 send) {
