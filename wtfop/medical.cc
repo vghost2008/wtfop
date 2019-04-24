@@ -288,7 +288,6 @@ class MergeCharacterOp: public OpKernel {
                             }
                         }
                     }
-                    cout<<__func__<<":"<<(h_words_nr<v_words_nr);
                     return h_words_nr<v_words_nr;
                 }
             }
@@ -301,7 +300,6 @@ class MergeCharacterOp: public OpKernel {
             auto ymax = std::max(lhv(2),rhv(2));
             auto xmax = std::max(lhv(3),rhv(3));
             float data[] = {ymin,xmin,ymax,xmax};
-            cout<<"Merge:"<<bbox_to_str(lhv)<<","<<bbox_to_str(rhv)<<endl;
             return Eigen::TensorMap<bbox_t>(data,4);
         }
         vector<bbox_t> merge_super_bboxes(const vector<bbox_t>& bboxes) {
@@ -311,10 +309,6 @@ class MergeCharacterOp: public OpKernel {
             array<int,4> counts = {0,0,0,0};
             for(auto& info:text_info)
                 ++counts[get<2>(info)];
-            cout<<"Count:{";
-            for(auto x:counts)
-                cout<<x<<",";
-            cout<<"}"<<endl;
             const auto type = distance(counts.begin(),max_element(counts.begin(),counts.end()));
             switch(type) {
                 case 0:
