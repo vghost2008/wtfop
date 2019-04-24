@@ -195,8 +195,8 @@ template <typename T>
 class BoxesEncodeUnit {
 	public:
 		struct IOUIndex{
-			int index;
-			float iou;
+			int index; //与当前box对应的gbbox序号
+			float iou;//与其对应的gbbox的IOU
 		};
 		explicit BoxesEncodeUnit(float pos_threshold,float neg_threshold,const std::vector<float>& prio_scaling) 
 			:pos_threshold_(pos_threshold)

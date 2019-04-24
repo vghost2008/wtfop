@@ -872,7 +872,7 @@ REGISTER_KERNEL_BUILDER(Name("EBoxesNms").Device(DEVICE_CPU).TypeConstraint<floa
  * output_labels:[batch_size,X], 当前anchorbox的标签，背景为0,不为背景时为相应最大jaccard得分
  * output_scores:[batch_size,X], 当前anchorbox与groundtruthbox的jaccard得分，当jaccard得分高于threshold时就不为背影
  * output_remove_indict:[batch_size,X], anchorbox是否有效(一般为iou处理中间部分的无效)
- * output_indict:[batch_size,X], 当anchorbox有效时，与它对应的gboxes序号
+ * output_indict:[batch_size,X], 当anchorbox有效时，与它对应的gboxes(从0开始)序号,无效时为-1
  */
 REGISTER_OP("BoxesEncode")
     .Attr("T: {float,double,int32,int64}")
