@@ -23,7 +23,7 @@ namespace ba=boost::algorithm;
 typedef Eigen::ThreadPoolDevice CPUDevice;
 /*
  * 
- * bbox:[Nr,4](y,x,h,w)
+ * bbox:[Nr,4](ymin,xmin,ymax,xmax)
  * labels:[Nr]
  * dlabels:[Nr]
  * type:[1]
@@ -70,7 +70,7 @@ class MergeCharacterOp: public OpKernel {
             list<vector<int>> res_texts;
             for(auto i=0; i<data_nr; ++i) {
                 if(labels(i) != super_box_type_)continue;
-                super_boxes.emplace_back(expand_bbox(bboxes.chip(i,0)));
+                super_boxes.emplace_back(shrink_super_bbox(expand_bbox(bboxes.chip(i,0)),bboxes,labels));
             }
             super_boxes = merge_super_bboxes(super_boxes);
             finetune_super_boxes(super_boxes,bboxes,labels);
@@ -480,6 +480,44 @@ class MergeCharacterOp: public OpKernel {
                 return Eigen::TensorMap<bbox_t>(data,4);
             }
         }
+       template<typename BT,typename LT>
+           bbox_t shrink_super_bbox(const bbox_t& v,const BT& bboxes,const LT& labels) {
+               auto       minx            = 1.0f;
+               auto       miny            = 1.0;
+               auto       maxx            = 0.0f;
+               auto       maxy            = 0.0f;
+               auto       is_h            = is_horizontal(v);
+               auto       count           = 0;
+               const auto kThreshold      = 0.333;
+               const auto kCountThreshold = 3;
+               const auto data_nr = bboxes.dimension(0);
+
+               for(auto i=0; i<data_nr; ++i) {
+                   bbox_t cur_bbox = bboxes.chip(i,0);
+                   if((labels(i) != super_box_type_) ||
+                           iou(v,cur_bbox,is_h)<kThreshold)continue;
+                   if(minx>cur_bbox(1))
+                       minx = cur_bbox(1);
+                   if(miny>cur_bbox(0))
+                       miny = cur_bbox(0);
+                   if(maxx<cur_bbox(3))
+                       minx = cur_bbox(3);
+                   if(maxy<cur_bbox(2))
+                       miny = cur_bbox(2);
+               }
+               if(count<kCountThreshold)
+                   return v;
+               auto res = v;
+               if(res(0)<miny)
+                   res(0) = miny;
+               if(res(1)<minx)
+                   res(1) = minx;
+               if(res(2)>maxy)
+                   res(2) = maxy;
+               if(res(3)>maxx)
+                   res(3) = maxx;
+               return res;
+           }
 	private:
 		float expand_         = 0.;
 		int   super_box_type_ = 0;
