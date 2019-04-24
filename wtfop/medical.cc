@@ -70,7 +70,11 @@ class MergeCharacterOp: public OpKernel {
             list<vector<int>> res_texts;
             for(auto i=0; i<data_nr; ++i) {
                 if(labels(i) != super_box_type_)continue;
-                super_boxes.emplace_back(shrink_super_bbox(expand_bbox(bboxes.chip(i,0)),bboxes,labels));
+                try {
+                    auto res = shrink_super_bbox(expand_bbox(bboxes.chip(i,0)),bboxes,labels);
+                    super_boxes.emplace_back(res);
+                } catch(...) {
+                }
             }
             super_boxes = merge_super_bboxes(super_boxes);
             finetune_super_boxes(super_boxes,bboxes,labels);
@@ -505,8 +509,11 @@ class MergeCharacterOp: public OpKernel {
                    if(maxy<cur_bbox(2))
                        miny = cur_bbox(2);
                }
-               if(count<kCountThreshold)
+               if(count<kCountThreshold) {
+                   if(count==0)
+                       throw runtime_error("error");
                    return v;
+               }
                auto res = v;
                if(res(0)<miny)
                    res(0) = miny;
