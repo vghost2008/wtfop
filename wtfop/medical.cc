@@ -46,6 +46,7 @@ class MergeCharacterOp: public OpKernel {
     public:
             using bbox_t = Eigen::Tensor<T,1,Eigen::RowMajor>;
             using bbox_info_t = tuple<bbox_t,int,int>;
+            using self_type_t = MergeCharacterOp<Device,T>;
 	public:
 		explicit MergeCharacterOp(OpKernelConstruction* context) : OpKernel(context) {
 			OP_REQUIRES_OK(context, context->GetAttr("expand", &expand_));
@@ -68,6 +69,7 @@ class MergeCharacterOp: public OpKernel {
             const auto     data_nr              = _bboxes.dim_size(0);
             vector<bbox_t> super_boxes;
             list<vector<int>> res_texts;
+
             for(auto i=0; i<data_nr; ++i) {
                 if(labels(i) != super_box_type_)continue;
                 try {
@@ -78,7 +80,9 @@ class MergeCharacterOp: public OpKernel {
             }
             super_boxes = merge_super_bboxes(super_boxes);
             finetune_super_boxes(super_boxes,bboxes,labels);
-            auto         is_h        = is_horizontal_text(super_boxes,bboxes);
+
+            const auto         is_h        = is_horizontal_text(super_boxes,dlabels);
+
             if(is_h) {
                 sort(super_boxes.begin(),super_boxes.end(),[](const bbox_t& lhv,const bbox_t& rhv) { return lhv[0]<rhv[0];});
             } else {
@@ -92,7 +96,7 @@ class MergeCharacterOp: public OpKernel {
             }
 
             vector<float> bbox_iou;
-            vector<int>    bboxes_type(size_t(data_nr),-1);
+            vector<int>   bboxes_type(size_t(data_nr),-1);
 
             bbox_iou.reserve(super_boxes.size());
 
@@ -140,7 +144,7 @@ class MergeCharacterOp: public OpKernel {
                 cur_bboxes.emplace_back(bboxes.chip(i,0),labels(i),dlabels(i));
                 for(auto j=i+1; j<bboxes_type.size(); ++j) {
                     if((bboxes_type[j] != -1) || (labels(j)==super_box_type_)) continue;
-                    auto scores = iou(bboxes.chip(i,0),bboxes.chip(j,0),is_h);
+                    auto scores = iou(bboxes.chip(i,0),bboxes.chip(j,0),is_horizontal(dlabels(i)));
                     if(scores>0.3) {
                         bboxes_type[j] = 0;
                         cur_bboxes.emplace_back(bboxes.chip(j,0),labels(j),dlabels(j));
@@ -258,41 +262,24 @@ class MergeCharacterOp: public OpKernel {
         float iou(const bbox_t& super_box,const bbox_t& bbox) {
             return bboxes_jaccard_of_box0v1(bbox,super_box);
         }
-        template<typename TT>
-            inline bool is_horizontal_text(const vector<bbox_t>& boxes,const TT& bboxes) {
+        template<typename LT>
+            inline bool is_horizontal_text(const vector<bbox_t>& boxes,const LT& dlabels) {
                 if(!boxes.empty()) {
                     vector<int> is_hors(boxes.size());
-                    transform(boxes.begin(),boxes.end(),is_hors.begin(),is_horizontal);
+                    transform(boxes.begin(),boxes.end(),is_hors.begin(),(bool (*)(const bbox_t&)) is_horizontal);
                     return accumulate(is_hors.begin(),is_hors.end(),0)>(boxes.size()/2);
                 } else {
-                    int h_words_nr = 0;
-                    int v_words_nr = 0;
-                    const auto data_nr = bboxes.dimension(0);
-                    vector<bool> h_mask(data_nr,false);
-                    vector<bool> v_mask(data_nr,false);
-                    for(auto i=0; i<data_nr; ++i) {
-                        if(!h_mask[i]) {
-                            h_words_nr += 1;
-                            for(auto j=i+1; j<data_nr; ++j) {
-                                if((!h_mask[j]) && (iou(bboxes.chip(i,0),bboxes.chip(j,0),true)>0.5)) {
-                                       h_mask[j] = true;
-                                }
-                            }
-                        }
-                        if(!v_mask[i]) {
-                            v_words_nr += 1;
-                            for(auto j=i+1; j<data_nr; ++j) {
-                                if((!v_mask[j]) && (iou(bboxes.chip(i,0),bboxes.chip(j,0),true)>0.5)) {
-                                    v_mask[j] = true;
-                                }
-                            }
-                        }
-                    }
-                    return h_words_nr<v_words_nr;
+                    const auto data_nr = dlabels.dimension(0);
+                    vector<int> is_hors(data_nr);
+                    transform(dlabels.data(),dlabels.data()+data_nr,is_hors.begin(),(bool (*)(int)) is_horizontal);
+                    return accumulate(is_hors.begin(),is_hors.end(),0)>(boxes.size()/2);
                 }
             }
         static inline bool is_horizontal(const bbox_t& box) {
             return (box(3)-box(1))>(box(2)-box(0));
+        }
+        static inline bool is_horizontal(int dlabel) {
+            return (dlabel==0)||(dlabel==2);
         }
         bbox_t merge_bbox(const bbox_t& lhv,const bbox_t& rhv) {
             auto ymin = std::min(lhv(0),rhv(0));
@@ -492,16 +479,17 @@ class MergeCharacterOp: public OpKernel {
 
                for(auto i=0; i<data_nr; ++i) {
                    bbox_t cur_bbox = bboxes.chip(i,0);
-                   if((labels(i) != super_box_type_) ||
+                   if((labels(i) == super_box_type_) ||
                            iou(v,cur_bbox,is_h)<kThreshold)continue;
                    if(minx>cur_bbox(1))
                        minx = cur_bbox(1);
                    if(miny>cur_bbox(0))
                        miny = cur_bbox(0);
                    if(maxx<cur_bbox(3))
-                       minx = cur_bbox(3);
+                       maxx = cur_bbox(3);
                    if(maxy<cur_bbox(2))
-                       miny = cur_bbox(2);
+                       maxy = cur_bbox(2);
+                   ++count;
                }
                if(count<kCountThreshold) {
                    if(count==0)
