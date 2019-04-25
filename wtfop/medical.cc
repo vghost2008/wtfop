@@ -78,62 +78,20 @@ class MergeCharacterOp: public OpKernel {
                 } catch(...) {
                 }
             }
+            super_boxes = remove_bad_super_bboxes(super_boxes,bboxes,labels);
             super_boxes = merge_super_bboxes(super_boxes);
             finetune_super_boxes(super_boxes,bboxes,labels);
 
             const auto         is_h        = is_horizontal_text(super_boxes,dlabels);
 
-            if(is_h) {
-                sort(super_boxes.begin(),super_boxes.end(),[](const bbox_t& lhv,const bbox_t& rhv) { return lhv[0]<rhv[0];});
-            } else {
-                sort(super_boxes.begin(),super_boxes.end(),[](const bbox_t& lhv,const bbox_t& rhv) { return lhv[1]<rhv[1];});
-            }
-
+            sort_super_boxes(super_boxes,is_h);
 
             if(data_nr-super_boxes.size() == 0) {
                 make_default_return(context);
                 return;
             }
 
-            vector<float> bbox_iou;
-            vector<int>   bboxes_type(size_t(data_nr),-1);
-
-            bbox_iou.reserve(super_boxes.size());
-
-            for(auto i=0; i<data_nr; ++i) {
-                if(labels(i) == super_box_type_) continue;
-
-                const bbox_t cur_bbox = bboxes.chip(i,0);
-
-                bbox_iou.clear();
-                for(auto sbbox:super_boxes) {
-                    const auto iou_v = iou(sbbox,cur_bbox);
-                    bbox_iou.emplace_back(iou_v);
-                }
-                if(bbox_iou.empty()) continue;
-
-                auto it = max_element(bbox_iou.begin(),bbox_iou.end());
-
-                if(*it >= 0.333)
-                    bboxes_type[i] = int(distance(bbox_iou.begin(),it));
-            }
-            for(auto i=0; i<data_nr; ++i) {
-                if((labels(i) == super_box_type_) || (bboxes_type[i] != -1)) continue;
-
-                const bbox_t cur_bbox = bboxes.chip(i,0);
-
-                bbox_iou.clear();
-                for(auto sbbox:super_boxes) {
-                    const auto iou_v = iou(sbbox,cur_bbox,is_horizontal(sbbox));
-                    bbox_iou.emplace_back(iou_v);
-                }
-                if(bbox_iou.empty()) continue;
-
-                auto it = max_element(bbox_iou.begin(),bbox_iou.end());
-
-                if(*it >= 0.333)
-                    bboxes_type[i] = int(distance(bbox_iou.begin(),it));
-            }
+            auto  bboxes_type = get_bboxes_type(super_boxes,bboxes,labels);
 
             for(auto i=0; i<super_boxes.size(); ++i) {
                 const auto sbbox = super_boxes.at(i);
@@ -207,6 +165,13 @@ class MergeCharacterOp: public OpKernel {
 
             text_data[0] = 0;
         }
+        inline void sort_super_boxes(vector<bbox_t>& super_boxes,bool is_h) {
+            if(is_h) {
+                sort(super_boxes.begin(),super_boxes.end(),[](const bbox_t& lhv,const bbox_t& rhv) { return lhv[0]<rhv[0];});
+            } else {
+                sort(super_boxes.begin(),super_boxes.end(),[](const bbox_t& lhv,const bbox_t& rhv) { return lhv[1]<rhv[1];});
+            }
+        }
         static bool is_good(const vector<bbox_info_t>& infos) {
             const auto is_h = is_horizontal_text(infos);
             auto       minx            = 1.0f;
@@ -268,6 +233,70 @@ class MergeCharacterOp: public OpKernel {
             if(error_count>infos.size()/3) return false;
             return true;
         }
+        template<typename BT,typename LT>
+        vector<bbox_t> remove_bad_super_bboxes(const vector<bbox_t>& super_boxes,const BT& bboxes,const LT& labels) {
+            auto  bboxes_type = get_bboxes_type(super_boxes,bboxes,labels);
+            const auto data_nr = labels.dimension(0);
+            vector<bbox_t> res;
+
+            for(auto i=0; i<super_boxes.size(); ++i) {
+                const auto sbbox = super_boxes.at(i);
+                vector<bbox_info_t> cur_bboxes;
+
+                for(auto j=0; j<data_nr; ++j) {
+                    if((bboxes_type[j] == i) && (labels(j) != super_box_type_)) {
+                        cur_bboxes.emplace_back(bboxes.chip(j,0),labels(j),-1,j);
+                    }
+                }
+                if(cur_bboxes.empty() || (!is_good(cur_bboxes)))continue;
+                res.push_back(sbbox);
+            }
+            return res;
+        }
+        template<typename BT,typename LT>
+            vector<int> get_bboxes_type(const vector<bbox_t>& super_boxes,const BT& bboxes,const LT& labels) {
+                const auto data_nr = labels.dimension(0);
+                vector<float> bbox_iou;
+                vector<int>   bboxes_type(size_t(data_nr),-1);
+
+                bbox_iou.reserve(super_boxes.size());
+
+                for(auto i=0; i<data_nr; ++i) {
+                    if(labels(i) == super_box_type_) continue;
+
+                    const bbox_t cur_bbox = bboxes.chip(i,0);
+
+                    bbox_iou.clear();
+                    for(auto sbbox:super_boxes) {
+                        const auto iou_v = iou(sbbox,cur_bbox);
+                        bbox_iou.emplace_back(iou_v);
+                    }
+                    if(bbox_iou.empty()) continue;
+
+                    auto it = max_element(bbox_iou.begin(),bbox_iou.end());
+
+                    if(*it >= 0.333)
+                        bboxes_type[i] = int(distance(bbox_iou.begin(),it));
+                }
+                for(auto i=0; i<data_nr; ++i) {
+                    if((labels(i) == super_box_type_) || (bboxes_type[i] != -1)) continue;
+
+                    const bbox_t cur_bbox = bboxes.chip(i,0);
+
+                    bbox_iou.clear();
+                    for(auto sbbox:super_boxes) {
+                        const auto iou_v = iou(sbbox,cur_bbox,is_horizontal(sbbox));
+                        bbox_iou.emplace_back(iou_v);
+                    }
+                    if(bbox_iou.empty()) continue;
+
+                    auto it = max_element(bbox_iou.begin(),bbox_iou.end());
+
+                    if(*it >= 0.333)
+                        bboxes_type[i] = int(distance(bbox_iou.begin(),it));
+                }
+                return bboxes_type;
+            }
         void show_superbboxes(const vector<bbox_t>& bboxes,float h=256.0f,float w=256.0f) {
             cout<<"{";
             for(auto& box:bboxes) {
