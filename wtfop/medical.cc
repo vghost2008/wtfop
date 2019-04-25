@@ -107,17 +107,31 @@ class MergeCharacterOp: public OpKernel {
 
                 bbox_iou.clear();
                 for(auto sbbox:super_boxes) {
-                    const auto iou0 = iou(sbbox,cur_bbox,is_horizontal(sbbox));
-                    const auto iou1 = iou(sbbox,cur_bbox);
-                    bbox_iou.emplace_back(max<float>(iou0,iou1));
+                    const auto iou_v = iou(sbbox,cur_bbox);
+                    bbox_iou.emplace_back(iou_v);
                 }
                 if(bbox_iou.empty()) continue;
 
                 auto it = max_element(bbox_iou.begin(),bbox_iou.end());
 
-                if(*it < 0.333)
-                    bboxes_type[i] = -1;
-                else
+                if(*it >= 0.333)
+                    bboxes_type[i] = int(distance(bbox_iou.begin(),it));
+            }
+            for(auto i=0; i<data_nr; ++i) {
+                if((labels(i) == super_box_type_) || (bboxes_type[i] != -1)) continue;
+
+                const bbox_t cur_bbox = bboxes.chip(i,0);
+
+                bbox_iou.clear();
+                for(auto sbbox:super_boxes) {
+                    const auto iou_v = iou(sbbox,cur_bbox,is_horizontal(sbbox));
+                    bbox_iou.emplace_back(iou_v);
+                }
+                if(bbox_iou.empty()) continue;
+
+                auto it = max_element(bbox_iou.begin(),bbox_iou.end());
+
+                if(*it >= 0.333)
                     bboxes_type[i] = int(distance(bbox_iou.begin(),it));
             }
 
@@ -541,7 +555,6 @@ class MergeCharacterOp: public OpKernel {
                auto       miny            = 1.0;
                auto       maxx            = 0.0f;
                auto       maxy            = 0.0f;
-               auto       is_h            = is_horizontal(v);
                auto       count           = 0;
                const auto kThreshold      = 0.36;
                const auto kCountThreshold = 3;
@@ -550,7 +563,7 @@ class MergeCharacterOp: public OpKernel {
                for(auto i=0; i<data_nr; ++i) {
                    bbox_t cur_bbox = bboxes.chip(i,0);
                    if((labels(i) == super_box_type_) ||
-                           iou(v,cur_bbox,is_h)<kThreshold)continue;
+                           iou(v,cur_bbox)<kThreshold)continue;
                    if(minx>cur_bbox(1))
                        minx = cur_bbox(1);
                    if(miny>cur_bbox(0))
