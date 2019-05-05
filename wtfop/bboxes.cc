@@ -2188,11 +2188,18 @@ class RandomDistoredBoxesOp: public OpKernel {
 			std::uniform_real_distribution<> yoffset(-limits_[1],limits_[1]);
 			std::uniform_real_distribution<> scale(-limits_[2],limits_[2]);
 			for(auto i=0; i<size_; ++i) {
-				process(boxes_flat.data(),outputboxes.data(),
+				/*process(boxes_flat.data(),outputboxes.data(),
 						nr,
 						xoffset(gen),
 						yoffset(gen),
 						scale(gen),
+						output_index);*/
+				process(boxes_flat.data(),outputboxes.data(),
+						nr,
+						xoffset,
+						yoffset,
+						scale,
+                        gen,
 						output_index);
 			}
 		}
@@ -2204,6 +2211,24 @@ class RandomDistoredBoxesOp: public OpKernel {
 				const auto sdy      = (src_box[2]-src_box[0]) *scale/2.;
                 const auto dx      = (src_box[3]-src_box[1])*xoffset;
                 const auto dy      = (src_box[2]-src_box[0])*yoffset;
+                auto       cur_box = out_boxes+4 *output_index++;
+
+                copy_box(src_box,cur_box);
+				cur_box[0] += dy-sdy;
+				cur_box[1] += dx-sdx;
+				cur_box[2] += dy+sdy;
+				cur_box[3] += dx+sdx;
+            }
+		}
+        template<typename dis_t,typename gen_t>
+		void process(const T* src_boxes,T* out_boxes,int nr,dis_t& xoffset,dis_t& yoffset,dis_t& scale,gen_t& gen,int& output_index) 
+		{
+            for(auto k=0; k<nr; ++k) {
+                const auto src_box = src_boxes+4*k;
+				const auto sdx     = (src_box[3]-src_box[1]) *scale(gen)/2.;
+				const auto sdy     = (src_box[2]-src_box[0]) *scale(gen)/2.;
+                const auto dx      = (src_box[3]-src_box[1])*xoffset(gen);
+                const auto dy      = (src_box[2]-src_box[0])*yoffset(gen);
                 auto       cur_box = out_boxes+4 *output_index++;
 
                 copy_box(src_box,cur_box);
