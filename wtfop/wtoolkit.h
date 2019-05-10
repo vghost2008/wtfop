@@ -6,7 +6,7 @@
  
  void default_log_func(const std::string& v)
  {
-     cout<<v<<endl;
+     std::cout<<v<<std::endl;
  }
  class WTimeThis
 {
