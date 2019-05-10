@@ -673,7 +673,7 @@ class SetValueOp: public OpKernel {
 			auto          dim_nr         = _tensor.dims();
 			auto          skip_dim_nr    = _index.dim_size(0);
 			auto          offset         = 0;
-			auto          block_size     = _v.NumElements();
+			const auto    block_size     = _v.NumElements();
 			auto          cur_block_size = block_size;
 
 			for(auto i=skip_dim_nr-1; i>=0; --i) {
@@ -687,9 +687,8 @@ class SetValueOp: public OpKernel {
 
 			OP_REQUIRES_OK(context, context->allocate_output(0, _tensor.shape(), &output_data));
 
-			output_data->CopyFrom(_tensor,_tensor.shape());
-
 			auto      oq_tensor = output_data->template flat<T>().data();
+            copy(tensor,tensor+_tensor.NumElements(),oq_tensor);
 
 			/*
 			 * 如果原始数据中没有内容，使用0填充
