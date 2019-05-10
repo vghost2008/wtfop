@@ -167,7 +167,6 @@ class BoxesNmsOp: public OpKernel {
 
 		void Compute(OpKernelContext* context) override
 		{
-            WTimeThis("boxes nms");
 			const Tensor &bottom_box          = context->input(0);
 			const Tensor &bottom_classes      = context->input(1);
 			auto          bottom_box_flat     = bottom_box.flat<T>();
@@ -179,7 +178,6 @@ class BoxesNmsOp: public OpKernel {
 			const auto   data_nr           = bottom_box.dim_size(0);
 			vector<bool> keep_mask(data_nr,true);
 			const auto   loop_end          = data_nr-1;
-            cout<<"data nr:"<<data_nr<<endl;
 
 			for(auto i=0; i<loop_end; ++i) {
 				if(keep_mask[i]) {
