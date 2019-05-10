@@ -2,6 +2,8 @@
 import tensorflow as tf
 from tensorflow.python.framework import ops
 import os
+import numpy as np
+
 ops.NotDifferentiable("BoxesNms")
 ops.NotDifferentiable("EBoxesNms")
 ops.NotDifferentiable("DistoredBoxes")
@@ -17,6 +19,7 @@ ops.NotDifferentiable("PositionEmbedding")
 ops.NotDifferentiable("BoxesSoftNms")
 ops.NotDifferentiable("LabelType")
 ops.NotDifferentiable("IntHash")
+ops.NotDifferentiable("AnchorGenerator")
 
 module_path = os.path.realpath(__file__)
 module_dir = os.path.dirname(module_path)
@@ -207,11 +210,19 @@ def set_value(tensor,v,index):
         index = tf.cast(index,tf.int32)
     out = wtfop_module.set_value(tensor=tensor,v=v,index=index)
     return out 
+
 def sparse_mask_to_dense(mask,labels,num_classes,set_background=True):
     if labels.dtype is not tf.int32:
         labels = tf.cast(labels,tf.int32)
     out = wtfop_module.sparse_mask_to_dense(mask=mask,labels=labels,num_classes=num_classes,set_background=set_background)
     return out 
+
+def anchor_generator(shape,size,scales,aspect_ratios):
+    if isinstance(scales,np.ndarray):
+        scales = scales.tolist()
+    if isinstance(aspect_ratios,np.ndarray):
+        aspect_ratios= aspect_ratios.tolist()
+    return wtfop_module.anchor_generator(shape=shape,size=size,scales=scales,aspect_ratios=aspect_ratios)
 
 def random_range(max,hint,phy_max):
     if max.dtype is not tf.int32:
