@@ -204,6 +204,10 @@ class BoxesEncodeUnit {
 			 ,prio_scaling_(prio_scaling){
 				 assert(prio_scaling_.size() == 4);
 			 }
+        template<typename _T>
+        inline bool is_cross_boundaries(const _T& box) {
+            return (box(0)<0.0) || (box(1)<0.0) || (box(2)>1.0) ||(box(3)>1.0);
+        }
 		/*
 		template<typename DT0,typename DT1,typename DT2>
 			auto operator()(
@@ -245,6 +249,12 @@ class BoxesEncodeUnit {
 					 */
 					for(auto j=0; j<data_nr; ++j) {
 						const Eigen::Tensor<T,1,Eigen::RowMajor> box       = boxes.chip(j,0);
+
+                        /*
+                         * Faster-RCNN原文认为边界框上的bounding box不仔细处理会引起很大的不会收敛的误差
+                         */
+                        if(is_cross_boundaries(box)) continue;
+
 						auto        jaccard   = bboxes_jaccardv1(gbox,box);
 						auto       &iou_index = iou_indexs[j];
 
