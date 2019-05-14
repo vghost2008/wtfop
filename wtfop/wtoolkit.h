@@ -31,3 +31,12 @@
         const std::chrono::steady_clock::time_point t_;
         bool autolog_ = false;
 };
+//#define _TT_
+
+#ifdef _TT_
+#define TIME_THIS() WTimeThis(std::string(__func__)+":"+std::to_string(__LINE___))
+#define TIME_THISV1(x) WTimeThis(x)
+#else
+#define TIME_THIS() 
+#define TIME_THISV1(x) 
+#endif

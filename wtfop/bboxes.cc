@@ -167,6 +167,7 @@ class BoxesNmsOp: public OpKernel {
 
 		void Compute(OpKernelContext* context) override
 		{
+            TIME_THIS();
 			const Tensor &bottom_box          = context->input(0);
 			const Tensor &bottom_classes      = context->input(1);
 			auto          bottom_box_flat     = bottom_box.flat<T>();
@@ -375,6 +376,7 @@ class BoxesSoftNmsOp: public OpKernel {
 
         void Compute(OpKernelContext* context) override
         {
+            TIME_THIS();
             const Tensor &bottom_box          = context->input(0);
             const Tensor &bottom_classes      = context->input(1);
             const Tensor &confidence          = context->input(2);
@@ -492,6 +494,7 @@ class BoxesNmsNrOp: public OpKernel {
 
 		void Compute(OpKernelContext* context) override
 		{
+            TIME_THIS();
 			const Tensor &bottom_box          = context->input(0);
 			const Tensor &bottom_classes      = context->input(1);
 			auto          bottom_box_flat     = bottom_box.flat<T>();
@@ -1160,6 +1163,7 @@ class DecodeBoxes1Op: public OpKernel {
 
 		void Compute(OpKernelContext* context) override
 		{
+            TIME_THIS();
 			const Tensor &bottom_boxes       = context->input(0);
 			const Tensor &bottom_regs        = context->input(1);
 			auto          bottom_regs_flat   = bottom_regs.flat<T>();
