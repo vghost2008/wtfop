@@ -42,7 +42,7 @@ auto bboxes_jaccardv1(const T0& box0, const T1& box1)
 
 	if(union_vol<1E-6) return 0.0f;
 
-	return int_vol/union_vol;
+	return float(int_vol/union_vol);
 }
 template<typename T0,typename T1>
 auto bboxes_jaccardv2(const T0& box0, const T1& box1,bool is_h)
