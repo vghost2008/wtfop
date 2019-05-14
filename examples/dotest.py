@@ -1,8 +1,10 @@
 #coding=utf-8
 import tensorflow as tf
 from wtfop.wtfop_ops import boxes_soft_nms,crop_boxes,boxes_encode,decode_boxes1,boxes_encode1,int_hash
+import wtfop.wtfop_ops as wop
 import object_detection.npod_toolkit as npod
 import numpy as np
+import wml_utils as wmlu
 import random
 import time
 
@@ -82,6 +84,16 @@ class WTFOPTest(tf.test.TestCase):
             self.assertAllClose(a=target_out_boxes,b=out_boxes,atol=1e-4,rtol=0.)
             self.assertAllEqual(a=target_out_labels,b=out_labels)
             self.assertAllClose(a=target_out_scores,b=out_scores,atol=1e-5,rtol=0.)
+
+    def test_adjacent_matrix_generator(self):
+        np_gboxes = np.array([
+            [0.0, 0.0, 0.2, 0.2], [0.1, 0.1, 0.5, 0.4], [0.1, 0.1, 0.4, 0.4], [0.1, 0.0, 0.2, 0.3],
+            [0.5, 0.5, 0.6, 0.6], [0.5, 0.6, 0.7, 0.8], [0.5, 0.7, 0.6, 0.8], [0.7, 0.7, 0.9, 0.8],
+        ]);
+        with self.test_session() as sess:
+            am = wop.adjacent_matrix_generator(bboxes=np_gboxes,theta=10.,scale=2)
+            am = sess.run(am)
+            wmlu.show_nparray(am,"AM")
 
     def testEncodeBoxes1(self):
         with self.test_session() as sess:

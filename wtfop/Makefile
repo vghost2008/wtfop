@@ -15,7 +15,7 @@ CXXFLAGS = -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared -g -I $
 build: wtfop.so
 
 #wtfop.so: wtfop.cc bboxes.cc wtoolkit.cc nlp.cc dentalfilm.cc medical.cc
-wtfop.so: wtfop.o bboxes.o wtoolkit.o nlp.o dentalfilm.o medical.o
+wtfop.so: wtfop.o bboxes.o wtoolkit.o nlp.o dentalfilm.o medical.o gn.o
 	echo $^
 	g++ -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared -g -o $@ $^ -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=0 -fPIC -L${TF_LIB} -ltensorflow_framework 
 

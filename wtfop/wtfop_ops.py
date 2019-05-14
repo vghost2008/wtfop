@@ -20,6 +20,7 @@ ops.NotDifferentiable("BoxesSoftNms")
 ops.NotDifferentiable("LabelType")
 ops.NotDifferentiable("IntHash")
 ops.NotDifferentiable("AnchorGenerator")
+ops.NotDifferentiable("AdjacentMatrixGenerator")
 
 module_path = os.path.realpath(__file__)
 module_dir = os.path.dirname(module_path)
@@ -239,6 +240,9 @@ def random_range(max,hint,phy_max):
 def int_hash(input,table):
     out = wtfop_module.int_hash(input=input,key=list(table.keys()),value=list(table.values()))
     return out
+
+def adjacent_matrix_generator(bboxes,theta=100,scale=1.0,coord_scales=[1.0,1.0,1.0]):
+    return wtfop_module.adjacent_matrix_generator(bboxes=bboxes,theta=theta,scale=scale,coord_scales=coord_scales)
 
 @ops.RegisterGradient("RoiPooling")
 def _roi_pool_grad(op, grad, _):

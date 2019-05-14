@@ -19,7 +19,9 @@
 
 using namespace tensorflow;
 using namespace std;
+
 typedef Eigen::ThreadPoolDevice CPUDevice;
+
 /*
  * 
  * bottom_box:[batch_size,Nr,4](y,x,h,w)
