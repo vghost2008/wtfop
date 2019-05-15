@@ -18,6 +18,18 @@ class WTFOPTest(tf.test.TestCase):
         max_x = min_x+random.random()*(1.0-min_x)
         return (min_y*h,min_x*w,max_y*h,max_x*w)
 
+    def test_wpad(self):
+        with self.test_session() as sess:
+            a = tf.constant([1,2,3])
+            a = wop.wpad(a,[0,4])
+            t_a = np.array([1,2,3,3,2,1,3])
+            b = tf.constant([1,2,3,4,5,6])
+            b = wop.wpad(b,[0,-4])
+            t_b = np.array([1,2,3,4,5,6])
+            self.assertAllEqual(a.eval(),t_a)
+            self.assertAllEqual(b.eval(),t_b)
+
+
     def testSoftNMS(self):
         with self.test_session() as sess:
             boxes=tf.constant([[124,60,251,153],[161,85,293,193],[104,103,266,222],[277,371,414,484]],dtype=tf.float32)
