@@ -630,8 +630,11 @@ class WPadOp: public OpKernel {
                 oq_tensor[i+base_index] = data[i];
             }
             base_index = std::max<int>(0,padding[0])+data_nr;
-            for(auto i=0; i<padding[1]; ++i) {
-                oq_tensor[i+base_index] = data[abs(data_nr-1-i)%data_nr];
+            auto src_index = data_nr-1;
+            for(auto i=0; i<padding[1]; ++i,--src_index) {
+                if(src_index<0)
+                    src_index = data_nr-1;
+                oq_tensor[i+base_index] = data[src_index];
             }
 		}
 };
