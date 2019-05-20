@@ -95,6 +95,7 @@ class AdjacentMatrixGeneratorOp: public OpKernel {
 
             auto output           = output_matrix->template tensor<int,2>();
             for(auto i=0; i<bboxes_nr; ++i) {
+                output(i,i) = 0;
                 for(auto j=i+1; j<bboxes_nr; ++j) {
                     output(i,j) = res(i,j);
                     output(j,i) = res(i,j);
