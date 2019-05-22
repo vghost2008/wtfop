@@ -2340,7 +2340,7 @@ class BoxesMatchOp: public OpKernel {
                             index = k;
                         }
                     }
-                    if(index>0) {
+                    if(index>=0) {
                         oclasses(i,index) = glabels(i,j);
                         oscores(i,index) = max_scores;
                     }
