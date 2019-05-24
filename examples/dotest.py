@@ -103,9 +103,19 @@ class WTFOPTest(tf.test.TestCase):
             [0.5, 0.5, 0.6, 0.6], [0.5, 0.6, 0.7, 0.8], [0.5, 0.7, 0.6, 0.8], [0.7, 0.7, 0.9, 0.8],
         ]);
         with self.test_session() as sess:
-            am = wop.adjacent_matrix_generator(bboxes=np_gboxes,theta=10.,scale=2)
+            am = wop.adjacent_matrix_generator(bboxes=np_gboxes,theta=60.,scale=1)
             am = sess.run(am)
+            print(np.sum(am))
             wmlu.show_nparray(am,"AM")
+    def test_adjacent_matrix_generator_by_iou(self):
+        with self.test_session() as sess:
+            np_gboxes = np.array([
+                [0.0, 0.0, 0.2, 0.2], [0.0, 0.1, 0.2, 0.3], [0.1, 0.1, 0.4, 0.4], [0.1, 0.0, 0.2, 0.3],
+                [0.5, 0.5, 0.6, 0.6], [0.5, 0.5, 0.6, 0.62], [0.5, 0.7, 0.6, 0.8], [0.55, 0.7, 0.65, 0.8],
+            ]);
+        with self.test_session() as sess:
+            am = wop.adjacent_matrix_generator_by_iou(bboxes=np_gboxes,threshold=0.3)
+            self.assertAllEqual(am.eval(),[[0,1,0,1,0,0,0,0],[1,0,0,1,0,0,0,0],[0,0,0,1,1,0,0,0],[1,1,1,0,0,0,0,0],[0,0,1,0,0,1,0,0],[0,0,0,0,1,0,1,0],[0,0,0,0,0,1,0,1],[0,0,0,0,0,0,1,0]])
 
     def testEncodeBoxes1(self):
         with self.test_session() as sess:
