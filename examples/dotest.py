@@ -116,6 +116,9 @@ class WTFOPTest(tf.test.TestCase):
         with self.test_session() as sess:
             am = wop.adjacent_matrix_generator_by_iou(bboxes=np_gboxes,threshold=0.3)
             self.assertAllEqual(am.eval(),[[0,1,0,1,0,0,0,0],[1,0,0,1,0,0,0,0],[0,0,0,1,1,0,0,0],[1,1,1,0,0,0,0,0],[0,0,1,0,0,1,0,0],[0,0,0,0,1,0,1,0],[0,0,0,0,0,1,0,1],[0,0,0,0,0,0,1,0]])
+            bm = wop.adjacent_matrix_generator_by_iou(bboxes=np_gboxes,threshold=0.3,keep_connect=False)
+            wmlu.show_nparray(bm.eval())
+            self.assertAllEqual(bm.eval(),[[0,1,0,1,0,0,0,0],[1,0,0,1,0,0,0,0],[0,0,0,0,0,0,0,0],[1,1,0,0,0,0,0,0],[0,0,0,0,0,1,0,0],[0,0,0,0,1,0,0,0],[0,0,0,0,0,0,0,1],[0,0,0,0,0,0,1,0]])
 
     def testEncodeBoxes1(self):
         with self.test_session() as sess:

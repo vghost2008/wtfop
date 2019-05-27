@@ -244,8 +244,8 @@ def int_hash(input,table):
 def adjacent_matrix_generator(bboxes,theta=100,scale=1.0,coord_scales=[1.0,1.0,1.0]):
     return wtfop_module.adjacent_matrix_generator(bboxes=bboxes,theta=theta,scale=scale,coord_scales=coord_scales)
 
-def adjacent_matrix_generator_by_iou(bboxes,threshold=0.3):
-    return wtfop_module.adjacent_matrix_generator_by_iou(bboxes=bboxes,threshold=threshold)
+def adjacent_matrix_generator_by_iou(bboxes,threshold=0.3,keep_connect=True):
+    return wtfop_module.adjacent_matrix_generator_by_iou(bboxes=bboxes,threshold=threshold,keep_connect=keep_connect)
 
 @ops.RegisterGradient("RoiPooling")
 def _roi_pool_grad(op, grad, _):

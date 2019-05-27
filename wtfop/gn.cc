@@ -183,6 +183,7 @@ REGISTER_KERNEL_BUILDER(Name("AdjacentMatrixGenerator").Device(DEVICE_CPU).TypeC
 REGISTER_OP("AdjacentMatrixGeneratorByIou")
     .Attr("T: {float, double,int32}")
 	.Attr("threshold:float")
+    .Attr("keep_connect: bool")
     .Input("bboxes: T")
 	.Output("matrix:int32")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
@@ -196,6 +197,7 @@ class AdjacentMatrixGeneratorByIouOp: public OpKernel {
     public:
         explicit AdjacentMatrixGeneratorByIouOp(OpKernelConstruction* context) : OpKernel(context) {
             OP_REQUIRES_OK(context, context->GetAttr("threshold", &threshold_));
+            OP_REQUIRES_OK(context, context->GetAttr("keep_connect", &keep_connect_));
         }
 
         void Compute(OpKernelContext* context) override
@@ -209,15 +211,17 @@ class AdjacentMatrixGeneratorByIouOp: public OpKernel {
 
             dis_matrix.setZero();
 
-            for(auto i=0; i<bboxes_nr-1; ++i) {
-                const Eigen::Tensor<T,1,Eigen::RowMajor> box_data0 = bboxes.chip(i,0);
+            if(keep_connect_) {
+                for(auto i=0; i<bboxes_nr-1; ++i) {
+                    const Eigen::Tensor<T,1,Eigen::RowMajor> box_data0 = bboxes.chip(i,0);
 
-                dis_matrix(i,i) = 0.;
-                for(auto j=i+1; j<bboxes_nr; ++j) {
-                    const Eigen::Tensor<T,1,Eigen::RowMajor> box_data1 = bboxes.chip(j,0);
-                    const auto dis = distance(box_data0,box_data1);
-                    dis_matrix(i,j) = dis;
-                    dis_matrix(j,i) = dis;
+                    dis_matrix(i,i) = 0.;
+                    for(auto j=i+1; j<bboxes_nr; ++j) {
+                        const Eigen::Tensor<T,1,Eigen::RowMajor> box_data1 = bboxes.chip(j,0);
+                        const auto dis = distance(box_data0,box_data1);
+                        dis_matrix(i,j) = dis;
+                        dis_matrix(j,i) = dis;
+                    }
                 }
             }
 
@@ -245,30 +249,32 @@ class AdjacentMatrixGeneratorByIouOp: public OpKernel {
                     if(output(i,j)>0)++total_nr;
                 }
             }
-            cout<<"Total edge number: "<<total_nr<<", boxes nr:"<<bboxes_nr<<endl<<endl;
         }
         template<typename _T,typename M>
             Eigen::Tensor<int,2,Eigen::RowMajor> make_graph(const _T& bboxes,const M& dis_m) {
                 const auto data_nr = bboxes.dimension(0);
                 Graph g(data_nr);
-                auto weightmap = get(edge_weight,g);
-                for(auto i=0; i<data_nr; ++i) {
-                    for(auto j=i+1; j<data_nr; ++j) {
-                        Edge e;
-                        bool inserted;
-                        boost::tie(e,inserted) = add_edge(i,j,g);
-                        weightmap[e] = dis_m(i,j);
-                    }
-                }
-                std::vector < Edge > spanning_tree;
-                kruskal_minimum_spanning_tree(g, std::back_inserter(spanning_tree));
                 Eigen::Tensor<int,2,Eigen::RowMajor> res(data_nr,data_nr);
                 res.setZero();
-                for(auto e:spanning_tree) {
-                    auto si = source(e,g);
-                    auto ti = target(e,g);
-                    res(si,ti) = 1;
-                    res(ti,si) = 1;
+
+                if(keep_connect_) {
+                    auto weightmap = get(edge_weight,g);
+                    for(auto i=0; i<data_nr; ++i) {
+                        for(auto j=i+1; j<data_nr; ++j) {
+                            Edge e;
+                            bool inserted;
+                            boost::tie(e,inserted) = add_edge(i,j,g);
+                            weightmap[e] = dis_m(i,j);
+                        }
+                    }
+                    std::vector < Edge > spanning_tree;
+                    kruskal_minimum_spanning_tree(g, std::back_inserter(spanning_tree));
+                    for(auto e:spanning_tree) {
+                        auto si = source(e,g);
+                        auto ti = target(e,g);
+                        res(si,ti) = 1;
+                        res(ti,si) = 1;
+                    }
                 }
                 for(auto i=0; i<data_nr; ++i) {
                     const Eigen::Tensor<T,1,Eigen::RowMajor> box_data0 = bboxes.chip(i,0);
@@ -297,6 +303,7 @@ class AdjacentMatrixGeneratorByIouOp: public OpKernel {
         }
     private:
         float threshold_ = 0.3f;
+        bool keep_connect_ = false;
 };
 REGISTER_KERNEL_BUILDER(Name("AdjacentMatrixGeneratorByIou").Device(DEVICE_CPU).TypeConstraint<float>("T"), AdjacentMatrixGeneratorByIouOp<CPUDevice, float>);
 REGISTER_KERNEL_BUILDER(Name("AdjacentMatrixGeneratorByIou").Device(DEVICE_CPU).TypeConstraint<double>("T"), AdjacentMatrixGeneratorByIouOp<CPUDevice, double>);
