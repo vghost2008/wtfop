@@ -8,6 +8,7 @@
 *~
 __pycache__
 .idea
+.pytest*
 .DS_Store
 build
 core
