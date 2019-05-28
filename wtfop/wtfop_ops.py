@@ -21,6 +21,7 @@ ops.NotDifferentiable("LabelType")
 ops.NotDifferentiable("IntHash")
 ops.NotDifferentiable("AnchorGenerator")
 ops.NotDifferentiable("AdjacentMatrixGenerator")
+ops.NotDifferentiable("BoxesMatchWithPred")
 
 module_path = os.path.realpath(__file__)
 module_dir = os.path.dirname(module_path)
@@ -38,6 +39,16 @@ def boxes_match(boxes, gboxes, glabels, glens,threshold=0.7):
     if glens.dtype is not tf.int32:
         glens = tf.cast(glens,tf.int32)
     out = wtfop_module.boxes_match(boxes=boxes, gboxes=gboxes, glabels=glabels, glens=glens,threshold=threshold)
+    return out[0],out[1]
+
+def boxes_match_with_pred(boxes, plabels,gboxes, glabels, glens,threshold=0.7):
+    if glabels.dtype is not tf.int32:
+        glabels = tf.cast(glabels,tf.int32)
+    if plabels.dtype is not tf.int32:
+        plabels = tf.cast(plabels,tf.int32)
+    if glens.dtype is not tf.int32:
+        glens = tf.cast(glens,tf.int32)
+    out = wtfop_module.boxes_match_with_pred(boxes=boxes, plabels=plabels,gboxes=gboxes, glabels=glabels, glens=glens,threshold=threshold)
     return out[0],out[1]
 
 def teeth_adjacent_matrix(boxes, labels, min_nr=8, min_dis=0.3):

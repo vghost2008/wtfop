@@ -258,6 +258,28 @@ class WTFOPTest(tf.test.TestCase):
                 out = sess.run(out)
                 self.assertAllEqual(out,value)
 
+    def testBoxesMatch(self):
+        with self.test_session() as sess:
+            #人工核算
+            np_gboxes = np.array([[[0.0, 0.0, 0.2, 0.2], [0.3, 0.3, 0.5, 0.6], [0.1, 0.1, 0.4, 0.4], [0.7, 0.7, 0.9, 0.8]]]);
+            np_labels = np.array([[1,2,3,4]])
+            np_boxes = np.array([[[0.0, 0.0, 0.2, 0.1], [0.0, 0.0, 0.2, 0.2], [0.101, 0.1, 0.44, 0.4], [0.73, 0.71, 0.91, 0.81],
+                                 [0.7, 0.1, 0.9, 0.5], [0.3, 0.4, 0.5, 0.7],[0.3, 0.39, 0.5, 0.69]]]);
+            np_lens = np.array([np_labels.shape[1]])
+            gboxes = tf.constant(np_gboxes,dtype=tf.float32)
+            glabels = tf.constant(np_labels);
+            boxes = tf.constant(np_boxes,dtype=tf.float32)
+            lens = tf.constant(np_lens,dtype=tf.int32)
+            plabels = tf.constant([[0,1,0,0,0,2,0]],dtype=tf.int32)
+            plabels1 = tf.constant([[0,2,0,0,0,1,0]],dtype=tf.int32)
+            labels,scores = wop.boxes_match(boxes,gboxes,glabels,lens,threshold=0.5)
+            self.assertAllEqual(labels.eval(),[[0,1,3,4,0,0,2]])
+            labels, scores = wop.boxes_match_with_pred(boxes, plabels,gboxes, glabels, lens, threshold=0.5)
+            self.assertAllEqual(labels.eval(),[[0,1,3,4,0,2,0]])
+            labels, scores = wop.boxes_match_with_pred(boxes, plabels1,gboxes, glabels, lens, threshold=0.5)
+            self.assertAllEqual(labels.eval(),[[0,1,3,4,0,0,2]])
+
+
 if __name__ == "__main__":
     random.seed(int(time.time()))
     tf.test.main()
