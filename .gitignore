@@ -9,6 +9,7 @@
 __pycache__
 .idea
 .pytest*
+._*
 .DS_Store
 build
 core
