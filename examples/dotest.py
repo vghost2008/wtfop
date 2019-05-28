@@ -279,7 +279,7 @@ class WTFOPTest(tf.test.TestCase):
             labels, scores = wop.boxes_match_with_pred(boxes, plabels1,gboxes, glabels, lens, threshold=0.5)
             self.assertAllEqual(labels.eval(),[[0,1,3,4,0,0,2]])
 
-    def test_adjacent_matrix_generator_by_iou(self):
+    def test_adjacent_matrix_generator_by_iou1(self):
         with self.test_session() as sess:
             np_bboxes = np.array([[0.0, 0.0, 0.2, 0.2], [0.01, 0.02, 0.2, 0.19], [0.5, 0.5, 0.6, 0.6], [0.49, 0.5, 0.61, 0.6]]);
             bboxes = tf.constant(np_bboxes,dtype=tf.float32)
