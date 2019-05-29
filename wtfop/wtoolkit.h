@@ -4,7 +4,7 @@
 #include <sstream>
 #include <iostream>
  
- void default_log_func(const std::string& v)
+inline void default_log_func(const std::string& v)
  {
      std::cout<<v<<std::endl;
  }
