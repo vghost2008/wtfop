@@ -234,3 +234,73 @@ class IntHash: public OpKernel {
 		map<int,int> dict_;
 };
 REGISTER_KERNEL_BUILDER(Name("IntHash").Device(DEVICE_CPU).TypeConstraint<int>("T"), IntHash<CPUDevice, int>);
+/*
+ * 对Boxes的概率进行调整
+ * 具体方法为：
+ * 1，如果最大概率不在指定的类型中则不调整
+ * 2，否则将指定的类型中非最大概率的一半值分配给最大概率
+ * classes:指定需要调整的类别,如果为空则表示使用所有的非背景类别
+ * probs:概率，[X,N]
+ */
+REGISTER_OP("ProbabilityAdjust")
+    .Attr("T: {float, double}")
+	.Attr("classes:list(int)")
+    .Input("probs: T")
+	.Output("output_probs:T")
+	.SetShapeFn(shape_inference::UnchangedShape);
+
+template <typename Device, typename T>
+class ProbabilityAdjustOp: public OpKernel {
+	public:
+		explicit ProbabilityAdjustOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("classes", &classes_));
+		}
+		void Compute(OpKernelContext* context) override
+		{
+			const Tensor &probs = context->input(0);
+			auto          probs_flat = probs.flat<T>();
+			const auto    nr         = probs.dim_size(0);
+			const auto    classes_nr = probs.dim_size(1);
+
+			OP_REQUIRES(context, probs.dims() == 2, errors::InvalidArgument("probs must be 2-dimensional"));
+
+			TensorShape output_shape = probs.shape();
+
+			if(classes_.empty()) {
+				for(auto i=1; i<classes_nr; ++i) {
+					classes_.push_back(i);
+				}
+			}
+			auto it = remove_if(classes_.begin(),classes_.end(),[classes_nr](int i){ return (i<0) || (i>=classes_nr);});
+
+			classes_.erase(it,classes_.end());
+
+			Tensor *output_probs = NULL;
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_probs));
+
+			output_probs->CopyFrom(probs,output_shape);
+
+			auto output = output_probs->template flat<T>();
+
+			for(int i=0; i<nr; ++i) {
+				auto       v     = output.data()+i*classes_nr;
+				const auto it    = max_element(v,v+classes_nr);
+				const int  index = distance(v,it);
+				auto       jt    = find(classes_.begin(),classes_.end(),index);
+				auto       sum   = 0.;
+
+                if(jt ==classes_.end()) continue;
+
+                for(auto k:classes_) {
+                    if(k==index)continue;
+                    sum += v[k]/2.;
+                    v[k] = v[k]/2.;
+                }
+                v[index] = v[index]+sum;
+			}
+		}
+	private:
+		vector<int> classes_;
+};
+REGISTER_KERNEL_BUILDER(Name("ProbabilityAdjust").Device(DEVICE_CPU).TypeConstraint<float>("T"), ProbabilityAdjustOp<CPUDevice, float>);
