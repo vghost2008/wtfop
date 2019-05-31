@@ -191,6 +191,37 @@ template<typename T>
 float box_sizev1(const T& input) {
 	return (input(2)-input(0))*(input(3)-input(1));
 }
+template <typename T,typename T1>
+auto encode_one_boxes(const Eigen::Tensor<T,1,Eigen::RowMajor>& gbox,const Eigen::Tensor<T,1,Eigen::RowMajor>& ref_box,const T1& prio_scaling) {
+    Eigen::Tensor<T,1,Eigen::RowMajor> out_box(4);
+    auto &feat_cy = out_box(0);
+    auto &feat_cx = out_box(1);
+    auto &feat_h  = out_box(2);
+    auto &feat_w  = out_box(3);
+    auto  yxhw    = box_minmax_to_cxywh(ref_box.data());
+    auto  yref    = std::get<0>(yxhw);
+    auto  xref    = std::get<1>(yxhw);
+    auto  href    = std::get<2>(yxhw);
+    auto  wref    = std::get<3>(yxhw);
+
+    if((href<1E-8) || (wref<1E-8)) {
+        feat_cy = feat_cx = feat_h = feat_w = 0.0;
+        return out_box;
+    }
+
+    auto gyxhw = box_minmax_to_cxywh(gbox.data());
+
+    feat_cy  =  std::get<0>(gyxhw);
+    feat_cx  =  std::get<1>(gyxhw);
+    feat_h   =  std::get<2>(gyxhw);
+    feat_w   =  std::get<3>(gyxhw);
+
+    feat_cy  =  (feat_cy-yref)/(href*prio_scaling[0]);
+    feat_cx  =  (feat_cx-xref)/(wref*prio_scaling[1]);
+    feat_h   =  log(feat_h/href)/prio_scaling[2];
+    feat_w   =  log(feat_w/wref)/prio_scaling[3];
+    return out_box;
+}
 template <typename T>
 class BoxesEncodeUnit {
 	public:

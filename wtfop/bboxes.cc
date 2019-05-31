@@ -877,3 +877,153 @@ class BoxesMatchWithPredOp: public OpKernel {
 		float threshold_;
 };
 REGISTER_KERNEL_BUILDER(Name("BoxesMatchWithPred").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesMatchWithPredOp<CPUDevice, float>);
+
+/*
+ * 将boxes先与pred_bboxes匹配（通过pred_labels指定）如果IOU大于指定的阀值则为预测正确，没有与pred_bboxes匹配的bboxes与gboxes匹配，
+ * 与上面的版本相比会多输出一个boxex encode
+ * IOU最大且不小于threadshold的标记为相应的label, 即1个gboxes最多与一个boxes相对应
+ * boxes:[batch_size,N,4](y,x,h,w)
+ * plabels:[batch_size,N]预测的类别
+ * gboxes:[batch_size,M,4]
+ * glabels:[batch_size,M] 0表示背景
+ * glens:[batch_size] 用于表明gboxes中的有效boxes数量
+ * output_labels:[batch_size,N]
+ * output_scores:[batch_size,N]
+ * threashold: IOU threshold
+ */
+REGISTER_OP("BoxesMatchWithPred2")
+    .Attr("T: {float, double,int32}")
+	.Attr("threshold:float")
+ 	.Attr("prio_scaling: list(float)")
+    .Input("boxes: T")
+    .Input("plabels: int32")
+    .Input("gboxes: T")
+	.Input("glabels:int32")
+	.Input("glens:int32")
+	.Output("output_labels:int32")
+	.Output("output_scores:T")
+	.Output("output_encode:T")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+		    auto boxes_shape = c->input(0);
+			shape_inference::ShapeHandle outshape;
+			c->Subshape(boxes_shape,0,2,&outshape);
+			c->set_output(0, outshape);
+			c->set_output(1, outshape);
+			c->set_output(2, boxes_shape);
+			return Status::OK();
+			});
+
+template <typename Device, typename T>
+class BoxesMatchWithPred2Op: public OpKernel {
+	public:
+		explicit BoxesMatchWithPred2Op(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("threshold", &threshold_));
+			OP_REQUIRES_OK(context, context->GetAttr("prio_scaling", &prio_scaling));
+			OP_REQUIRES(context, prio_scaling.size() == 4, errors::InvalidArgument("prio scaling data must be shape[4]"));
+		}
+
+		void Compute(OpKernelContext* context) override
+		{
+			const Tensor &_boxes   = context->input(0);
+			const Tensor &_plabels = context->input(1);
+			const Tensor &_gboxes  = context->input(2);
+			const Tensor &_glabels = context->input(3);
+			const Tensor &_glens   = context->input(4);
+			auto          boxes    = _boxes.tensor<T,3>();
+			auto          plabels  = _plabels.tensor<int,2>();
+			auto          gboxes   = _gboxes.tensor<T,3>();
+			auto          glabels  = _glabels.tensor<int,2>();
+			auto          glens    = _glens.tensor<int,1>();
+
+			OP_REQUIRES(context, _boxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
+			OP_REQUIRES(context, _gboxes.dims() == 3, errors::InvalidArgument("gboxes data must be 3-dimensional"));
+			OP_REQUIRES(context, _glabels.dims() == 2, errors::InvalidArgument("glabels data must be 2-dimensional"));
+			OP_REQUIRES(context, _plabels.dims() == 2, errors::InvalidArgument("plabels data must be 2-dimensional"));
+			OP_REQUIRES(context, _glens.dims() == 1, errors::InvalidArgument("glens data must be 1-dimensional"));
+
+			const int batch_nr  = _boxes.dim_size(0);
+			const int boxes_nr  = _boxes.dim_size(1);
+			const int gboxes_nr = _gboxes.dim_size(1);
+            Eigen::Tensor<bool,2> process_mask(batch_nr,glabels.dimension(1));
+			int dims_2d[2] = {batch_nr,boxes_nr};
+			int dims_3d[3] = {batch_nr,boxes_nr,4};
+			TensorShape  outshape;
+			TensorShape  outshape1;
+			Tensor      *output_classes     = NULL;
+			Tensor      *output_scores      = NULL;
+			Tensor      *output_encode      = NULL;
+
+			TensorShapeUtils::MakeShape(dims_2d, 2, &outshape);
+			TensorShapeUtils::MakeShape(dims_3d, 3, &outshape1);
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, outshape, &output_classes));
+			OP_REQUIRES_OK(context, context->allocate_output(1, outshape, &output_scores));
+			OP_REQUIRES_OK(context, context->allocate_output(2, outshape1, &output_encode));
+
+			auto oclasses     = output_classes->template tensor<int,2>();
+			auto oscores      = output_scores->template tensor<T,2>();
+			auto oencodes     = output_encode->template tensor<T,3>();
+
+            process_mask.setZero();
+            oclasses.setZero();
+            oscores.setZero();
+            oencodes.setZero();
+
+            for(auto i=0; i<batch_nr; ++i) {
+                for(auto j=0; j<glens(i); ++j) {
+                    auto max_scores = -1.0;
+                    auto index      = -1;
+                    Eigen::Tensor<T,1,Eigen::RowMajor> gbox = gboxes.chip(i,0).chip(j,0);
+
+                    for(auto k=0; k<boxes_nr; ++k) {
+                        const auto plabel = plabels(i,k);
+                        if(plabel != glabels(i,j)) continue;
+                        if(oclasses(i,k) != 0) continue;
+
+                        Eigen::Tensor<T,1,Eigen::RowMajor> box = boxes.chip(i,0).chip(k,0);
+                        auto jaccard = bboxes_jaccardv1(gbox,box);
+
+                        if((jaccard>threshold_) && (jaccard>max_scores)) {
+                            max_scores = jaccard;
+                            index = k;
+                        }
+                    }
+                    if(index>=0) {
+                        oclasses(i,index) = glabels(i,j);
+                        oscores(i,index) = max_scores;
+                        oencodes.chip(i,0).chip(index,0) = encode_one_boxes<T>(gbox,boxes.chip(i,0).chip(index,0),prio_scaling);
+                        process_mask(i,j) = true;
+                    }
+                }
+            }
+            for(auto i=0; i<batch_nr; ++i) {
+                for(auto j=0; j<glens(i); ++j) {
+                    auto max_scores = -1.0;
+                    auto index      = -1;
+                    if(process_mask(i,j)) continue;
+                    Eigen::Tensor<T,1,Eigen::RowMajor> gbox = gboxes.chip(i,0).chip(j,0);
+
+                    for(auto k=0; k<boxes_nr; ++k) {
+                        if(oclasses(i,k) != 0) continue;
+
+                        Eigen::Tensor<T,1,Eigen::RowMajor> box = boxes.chip(i,0).chip(k,0);
+                        auto jaccard = bboxes_jaccardv1(gbox,box);
+
+                        if((jaccard>threshold_) && (jaccard>max_scores)) {
+                            max_scores = jaccard;
+                            index = k;
+                        }
+                    }
+                    if(index>=0) {
+                        oclasses(i,index) = glabels(i,j);
+                        oscores(i,index) = max_scores;
+                        oencodes.chip(i,0).chip(index,0) = encode_one_boxes<T>(gbox,boxes.chip(i,0).chip(index,0),prio_scaling);
+                    }
+                }
+            }
+		}
+	private:
+		float threshold_;
+		vector<float> prio_scaling;
+};
+REGISTER_KERNEL_BUILDER(Name("BoxesMatchWithPred2").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesMatchWithPred2Op<CPUDevice, float>);

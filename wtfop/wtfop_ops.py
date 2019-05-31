@@ -51,6 +51,16 @@ def boxes_match_with_pred(boxes, plabels,gboxes, glabels, glens,threshold=0.7):
     out = wtfop_module.boxes_match_with_pred(boxes=boxes, plabels=plabels,gboxes=gboxes, glabels=glabels, glens=glens,threshold=threshold)
     return out[0],out[1]
 
+def boxes_match_with_pred2(boxes, plabels,gboxes, glabels, glens,threshold=0.7,prio_scaling=[0.1,0.1,0.2,0.2]):
+    if glabels.dtype is not tf.int32:
+        glabels = tf.cast(glabels,tf.int32)
+    if plabels.dtype is not tf.int32:
+        plabels = tf.cast(plabels,tf.int32)
+    if glens.dtype is not tf.int32:
+        glens = tf.cast(glens,tf.int32)
+    out = wtfop_module.boxes_match_with_pred2(boxes=boxes, plabels=plabels,gboxes=gboxes, glabels=glabels, glens=glens,threshold=threshold,prio_scaling=prio_scaling)
+    return out[0],out[1],out[2]
+
 def teeth_adjacent_matrix(boxes, labels, min_nr=8, min_dis=0.3):
     if labels.dtype is not tf.int32:
         labels = tf.cast(labels,tf.int32)
