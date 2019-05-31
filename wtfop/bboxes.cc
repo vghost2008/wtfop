@@ -2417,6 +2417,9 @@ class BoxesMatchWithPredOp: public OpKernel {
 			TensorShape  outshape;
 			Tensor      *output_classes     = NULL;
 			Tensor      *output_scores      = NULL;
+            if(plabels.dimension(1) != boxes.dimension(1)) {
+                cout<<"Error plabels dimension 1"<<endl;
+            }
 
 			TensorShapeUtils::MakeShape(dims_2d, 2, &outshape);
 
