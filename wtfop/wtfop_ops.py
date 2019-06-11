@@ -249,6 +249,16 @@ def anchor_generator(shape,size,scales,aspect_ratios):
         data_nr = len(aspect_ratios)*len(scales)*shape[0]*shape[1]
         res = tf.reshape(res,[data_nr,4])
     return res
+def multi_anchor_generator(shape,size,scales,aspect_ratios):
+    if isinstance(scales,np.ndarray):
+        scales = scales.tolist()
+    if isinstance(aspect_ratios,np.ndarray):
+        aspect_ratios= aspect_ratios.tolist()
+    res = wtfop_module.multi_anchor_generator(shape=shape,size=size,scales=scales,aspect_ratios=aspect_ratios)
+    if not isinstance(shape,tf.Tensor):
+        data_nr = len(aspect_ratios)*shape[0]*shape[1]
+        res = tf.reshape(res,[data_nr,4])
+    return res
 
 def random_range(max,hint,phy_max):
     if max.dtype is not tf.int32:
