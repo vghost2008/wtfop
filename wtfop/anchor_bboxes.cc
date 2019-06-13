@@ -111,7 +111,7 @@ REGISTER_OP("MultiAnchorGenerator")
     .Attr("scales: list(float)")
     .Attr("aspect_ratios:list(float)")
 	.Input("shape:int32")
-	.Input("size:int32")
+	.Input("size:float")
 	.Output("anchors:float")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
 			c->set_output(0, c->Matrix(-1, 4));
@@ -138,7 +138,7 @@ class MultiAnchorGeneratorOp: public OpKernel {
 			const Tensor &_in_shape= context->input(0);
 			const Tensor &_in_size = context->input(1);
 			auto          in_shape = _in_shape.tensor<int,1>();
-			auto          in_size = _in_size.tensor<int,1>();
+			auto          in_size = _in_size.tensor<float,1>();
 
 			OP_REQUIRES(context, _in_shape.dims() == 1, errors::InvalidArgument("shape data must be 1-dimensional"));
 			OP_REQUIRES(context, _in_size.dims() == 1, errors::InvalidArgument("size data must be 1-dimensional"));
