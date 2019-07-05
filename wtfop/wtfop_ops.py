@@ -153,6 +153,12 @@ def boxes_nms(bboxes, classes, threshold=0.45,confidence=None,classes_wise=True)
     out = wtfop_module.boxes_nms(bottom_box=bboxes,classes=classes,threshold=threshold,classes_wise=classes_wise)
     return out[0],out[1],tf.cast(out[2],tf.int32)
 
+def no_overlap_boxes_nms(bboxes, classes, threshold0=0.2,threshold1=0.8,confidence=None,classes_wise=True):
+    if classes.dtype != tf.int32:
+        classes = tf.cast(classes,tf.int32)
+    out = wtfop_module.no_overlap_boxes_nms(bottom_box=bboxes,classes=classes,threshold0=threshold0,threshold1=threshold1,classes_wise=classes_wise)
+    return out[0],out[1],tf.cast(out[2],tf.int32)
+
 def group_boxes_nms(bboxes, classes, group,threshold=0.45,confidence=None):
     if classes.dtype != tf.int32:
         classes = tf.cast(classes,tf.int32)

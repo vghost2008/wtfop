@@ -647,3 +647,103 @@ class BoxesNmsNr2Op: public OpKernel {
 		int   k_            = 0;
 };
 REGISTER_KERNEL_BUILDER(Name("BoxesNmsNr2").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesNmsNr2Op<CPUDevice, float>);
+/*
+ * 要求数据已经按重要呈度从0到data_nr排好了序(从大到小）
+ * 用于处理目标不会重叠的情况
+ * bottom_box:[X,4](ymin,xmin,ymax,xmax)
+ * classes:[X]
+ * output_box:[Y,4]
+ * output_classes:[Y]
+ * output_index:[Y]
+ * 输出时的相对位置不能改变
+ */
+REGISTER_OP("NoOverlapBoxesNms")
+    .Attr("T: {float, double,int32}")
+	.Attr("threshold0:float")
+	.Attr("threshold1:float")
+	.Attr("classes_wise:bool")
+    .Input("bottom_box: T")
+    .Input("classes: int32")
+	.Output("output_box:T")
+	.Output("output_classes:int32")
+	.Output("output_index:int32")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+			c->set_output(0, c->Matrix(-1, 4));
+			c->set_output(1, c->Vector(-1));
+			c->set_output(2, c->Vector(-1));
+			return Status::OK();
+			});
+
+template <typename Device, typename T>
+class NoOverlapBoxesNmsOp: public OpKernel {
+	public:
+		explicit NoOverlapBoxesNmsOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("threshold0", &threshold0));
+			OP_REQUIRES_OK(context, context->GetAttr("threshold1", &threshold1));
+			OP_REQUIRES_OK(context, context->GetAttr("classes_wise", &classes_wise));
+		}
+
+		void Compute(OpKernelContext* context) override
+		{
+            TIME_THIS();
+			const Tensor &bottom_box          = context->input(0);
+			const Tensor &bottom_classes      = context->input(1);
+			auto          bottom_box_flat     = bottom_box.flat<T>();
+			auto          bottom_classes_flat = bottom_classes.flat<int32>();
+
+			OP_REQUIRES(context, bottom_box.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
+			OP_REQUIRES(context, bottom_classes.dims() == 1, errors::InvalidArgument("classes data must be 1-dimensional"));
+
+			const auto   data_nr           = bottom_box.dim_size(0);
+			vector<bool> keep_mask(data_nr,true);
+			const auto   loop_end          = data_nr-1;
+
+			for(auto i=0; i<loop_end; ++i) {
+				if(keep_mask[i]) {
+					const auto iclass = bottom_classes_flat(i);
+                    for(auto j=i+1; j<data_nr; ++j) {
+                        if(classes_wise && (bottom_classes_flat(j) != iclass)) continue;
+                        if((bboxes_jaccard(bottom_box_flat.data()+i*4,bottom_box_flat.data()+j*4) < threshold0)
+                                && (bboxes_jaccard_of_box0(bottom_box_flat.data()+i*4,bottom_box_flat.data()+j*4)<threshold1)
+                                && (bboxes_jaccard_of_box0(bottom_box_flat.data()+j*4,bottom_box_flat.data()+i*4)<threshold1)
+                          ) continue;
+                        keep_mask[j] = false;
+                    }
+				}
+			}
+
+			const auto out_size = count(keep_mask.begin(),keep_mask.end(),true);
+			int dims_2d[2] = {int(out_size),4};
+			int dims_1d[1] = {int(out_size)};
+			TensorShape  outshape0;
+			TensorShape  outshape1;
+			Tensor      *output_box         = NULL;
+			Tensor      *output_classes     = NULL;
+			Tensor      *output_index = NULL;
+
+			TensorShapeUtils::MakeShape(dims_2d, 2, &outshape0);
+			TensorShapeUtils::MakeShape(dims_1d, 1, &outshape1);
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_box));
+			OP_REQUIRES_OK(context, context->allocate_output(1, outshape1, &output_classes));
+			OP_REQUIRES_OK(context, context->allocate_output(2, outshape1, &output_index));
+
+			auto obox     = output_box->template flat<T>();
+			auto oclasses = output_classes->template flat<int32>();
+			auto oindex   = output_index->template flat<int32>();
+
+			for(int i=0,j=0; i<data_nr; ++i) {
+				if(!keep_mask[i]) continue;
+				auto box = bottom_box_flat.data()+i*4;
+				std::copy(box,box+4,obox.data()+4*j);
+				oclasses(j) = bottom_classes_flat(i);
+				oindex(j) = i;
+				++j;
+			}
+		}
+	private:
+		float threshold0    = 0.2;
+		float threshold1    = 0.8;
+		bool  classes_wise = true;
+};
+REGISTER_KERNEL_BUILDER(Name("NoOverlapBoxesNms").Device(DEVICE_CPU).TypeConstraint<float>("T"), NoOverlapBoxesNmsOp<CPUDevice, float>);
