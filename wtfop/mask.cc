@@ -42,13 +42,15 @@ REGISTER_OP("MaskLineBboxes")
 	.Output("output_lens:int32")
 	.Output("output_ids:int32")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
-            int        nr;
+            int        nr = -1;
+
+            c->GetAttr("max_output_nr",&nr);
+
             const auto batch_size = c->Value(c->Dim(c->input(0),0));
             const auto shape0     = c->MakeShape({batch_size,nr,4});
             const auto shape1     = c->Matrix(batch_size,nr);
             const auto shape2     = c->Vector(batch_size);
 
-            c->GetAttr("max_output_nr",&nr);
 			c->set_output(0, shape0);
 			c->set_output(1, shape1);
 			c->set_output(2, shape2);
