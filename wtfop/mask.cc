@@ -39,7 +39,8 @@ REGISTER_OP("MaskLineBboxes")
     .Input("lens: int32")
 	.Output("output_bboxes:float")
 	.Output("output_labels:T")
-	.Output("output_lens:T")
+	.Output("output_lens:int32")
+	.Output("output_ids:int32")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
             int        nr;
             const auto batch_size = c->Value(c->Dim(c->input(0),0));
@@ -51,6 +52,7 @@ REGISTER_OP("MaskLineBboxes")
 			c->set_output(0, shape0);
 			c->set_output(1, shape1);
 			c->set_output(2, shape2);
+			c->set_output(3, shape1);
 			return Status::OK();
 			});
 
@@ -80,21 +82,25 @@ class MaskLineBboxesOp: public OpKernel {
 			const auto     data_nr   = _mask.dim_size(1);
             list<vector<bbox_t>> out_bboxes;
             list<vector<int>> out_labels;
+            list<vector<int>> out_ids;
 
             for(auto i=0; i<batch_size; ++i) {
                 vector<bbox_t> res;
                 vector<int> res_labels;
+                vector<int> res_ids;
                 for(auto j=0; j<lens(i); ++j) {
                     const auto label = labels(i,j);
                     auto res0 = get_bboxes(mask.chip(i,0).chip(j,0));
                     if(!res0.empty()) {
                         res.insert(res.end(),res0.begin(),res0.end());
                         res_labels.insert(res_labels.begin(),res0.size(),label);
+                        res_ids.insert(res_ids.begin(),res0.size(),j);
                     }
                 }
                 assert(res.size()==res_labels.size());
                 out_bboxes.push_back(std::move(res));
                 out_labels.push_back(std::move(res_labels));
+                out_ids.push_back(std::move(res_ids));
             }
 
             auto output_nr = max_output_nr_;
@@ -113,6 +119,7 @@ class MaskLineBboxesOp: public OpKernel {
 			Tensor      *output_bbox   = NULL;
 			Tensor      *output_labels = NULL;
 			Tensor      *output_lens   = NULL;
+			Tensor      *output_ids    = NULL;
 
 			TensorShapeUtils::MakeShape(dims_3d, 3, &outshape0);
 			TensorShapeUtils::MakeShape(dims_2d, 2, &outshape1);
@@ -121,15 +128,19 @@ class MaskLineBboxesOp: public OpKernel {
 			OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_bbox));
 			OP_REQUIRES_OK(context, context->allocate_output(1, outshape1, &output_labels));
 			OP_REQUIRES_OK(context, context->allocate_output(2, outshape2, &output_lens));
+			OP_REQUIRES_OK(context, context->allocate_output(3, outshape1, &output_ids));
 
 			auto obbox   = output_bbox->template tensor<float,3>();
 			auto olabels = output_labels->template tensor<T,2>();
 			auto olens   = output_lens->template tensor<int32_t,1>();
+			auto oids    = output_ids->template tensor<int32_t,2>();
 
             obbox.setZero();
             olabels.setZero();
             auto itb = out_bboxes.begin();
             auto itl = out_labels.begin();
+            auto iti = out_ids.begin();
+
 			for(int i=0; i<batch_size; ++i,++itb,++itl) {
                 olens(i) = itl->size();
                 for(auto j=0; j<olens(i); ++j) {
@@ -138,6 +149,7 @@ class MaskLineBboxesOp: public OpKernel {
                     obbox(i,j,2) = std::get<2>((*itb)[j]);
                     obbox(i,j,3) = std::get<3>((*itb)[j]);
                     olabels(i,j) = (*itl)[j];
+                    oids(i,j) = (*iti)[j];
                 }
 			}
 		}
@@ -159,7 +171,7 @@ class MaskLineBboxesOp: public OpKernel {
                     auto begin_j = j;
                     while((mask(i,j)>0) && (j<w))++j;
                     const auto xmin = begin_j*x_delta;
-                    const auto xmax = (j==w)?1.0:(j-1)*x_delta;
+                    const auto xmax = (j==w)?1.0:j*x_delta;
                     res.emplace_back(ymin,xmin,ymax,xmax);
                 }
             }

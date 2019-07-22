@@ -255,6 +255,7 @@ def anchor_generator(shape,size,scales,aspect_ratios):
         data_nr = len(aspect_ratios)*len(scales)*shape[0]*shape[1]
         res = tf.reshape(res,[data_nr,4])
     return res
+
 def multi_anchor_generator(shape,size,scales,aspect_ratios):
     if isinstance(scales,np.ndarray):
         scales = scales.tolist()
@@ -263,6 +264,15 @@ def multi_anchor_generator(shape,size,scales,aspect_ratios):
     res = wtfop_module.multi_anchor_generator(shape=shape,size=size,scales=scales,aspect_ratios=aspect_ratios)
     if not isinstance(shape,tf.Tensor):
         data_nr = len(aspect_ratios)*shape[0]*shape[1]
+        res = tf.reshape(res,[data_nr,4])
+    return res
+
+def line_anchor_generator(shape,size,scales):
+    if isinstance(scales,np.ndarray):
+        scales = scales.tolist()
+    res = wtfop_module.line_anchor_generator(shape=shape,size=size,scales=scales)
+    if not isinstance(shape,tf.Tensor):
+        data_nr = len(scales)*shape[0]*shape[1]
         res = tf.reshape(res,[data_nr,4])
     return res
 
