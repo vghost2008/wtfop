@@ -284,6 +284,11 @@ def adjacent_matrix_generator(bboxes,theta=100,scale=1.0,coord_scales=[1.0,1.0,1
 def adjacent_matrix_generator_by_iou(bboxes,threshold=0.3,keep_connect=True):
     return wtfop_module.adjacent_matrix_generator_by_iou(bboxes=bboxes,threshold=threshold,keep_connect=keep_connect)
 
+def mask_line_bboxes(mask,labels,lens,max_output_nr=-1):
+    if mask.dtype != tf.uint8:
+        mask = tf.cast(mask,tf.uint8)
+    return wtfop_module.mask_line_bboxes(mask=mask,labels=labels,lens=lens,max_output_nr=max_output_nr)
+
 @ops.RegisterGradient("RoiPooling")
 def _roi_pool_grad(op, grad, _):
   data = op.inputs[0]
