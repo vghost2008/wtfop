@@ -211,6 +211,7 @@ class LineAnchorGeneratorOp: public OpKernel {
 
 		void Compute(OpKernelContext* context) override
 		{
+            TIME_THISV1("LineAnchorGenerator");
 			const Tensor &_in_shape= context->input(0);
 			const Tensor &_in_size = context->input(1);
 			auto          in_shape = _in_shape.tensor<int,1>();

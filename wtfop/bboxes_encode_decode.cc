@@ -16,6 +16,7 @@
 #include "tensorflow/core/util/work_sharder.h"
 #include "bboxes.h"
 #include "wtoolkit.h"
+#include <future>
 
 using namespace tensorflow;
 using namespace std;
@@ -74,6 +75,7 @@ class BoxesEncodeOp: public OpKernel {
 
 		void Compute(OpKernelContext* context) override
 		{
+            TIME_THISV1("BoxesEncode");
 			const Tensor &_bottom_boxes   = context->input(0);
 			const Tensor &_bottom_gboxes  = context->input(1);
 			const Tensor &_bottom_glabels = context->input(2);
@@ -117,32 +119,42 @@ class BoxesEncodeOp: public OpKernel {
 			auto output_indict_tensor         =  output_indict->template tensor<int,2>();
 
             BoxesEncodeUnit<T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
+            //for(auto i=0; i<batch_size; ++i) {
+            auto shard = [&](int64 start,int64 limit){
+                for(auto i=start; i<limit; ++i) {
+
+                    auto size     = bottom_gsize(i);
+                    auto boxes    = bottom_boxes.chip(bottom_boxes.dimension(0)==batch_size?i:0,0);
+                    auto _gboxes  = bottom_gboxes.chip(i,0);
+                    auto _glabels = bottom_glabels.chip(i,0);
+                    Eigen::array<long,2> offset={0,0};
+                    Eigen::array<long,2> extents={size,4};
+                    Eigen::array<long,1> offset1={0};
+                    Eigen::array<long,1> extents1={size};
+                    auto gboxes             = _gboxes.slice(offset,extents);
+                    auto glabels            = _glabels.slice(offset1,extents1);
+                    auto out_boxes          = output_boxes_tensor.chip(i,0);
+                    auto out_labels         = output_labels_tensor.chip(i,0);
+                    auto out_scores         = output_scores_tensor.chip(i,0);
+                    auto out_remove_indices = output_remove_indict_tensor.chip(i,0);
+                    auto out_indices        = output_indict_tensor.chip(i,0);
+                    auto res                = encode_unit(boxes,gboxes,glabels);
+
+                    out_boxes           =  std::get<0>(res);
+                    out_labels          =  std::get<1>(res);
+                    out_scores          =  std::get<2>(res);
+                    out_remove_indices  =  std::get<3>(res);
+                    out_indices         =  std::get<4>(res);
+                }
+            };
+            /*const DeviceBase::CpuWorkerThreads& worker_threads = *(context->device()->tensorflow_cpu_worker_threads());
+            const int64 total_cost= 1e6;
+            Shard(worker_threads.num_threads, worker_threads.workers, batch_size, total_cost, shard);*/
+            list<future<void>> results;
             for(auto i=0; i<batch_size; ++i) {
-
-                auto size     = bottom_gsize(i);
-                auto boxes    = bottom_boxes.chip(bottom_boxes.dimension(0)==batch_size?i:0,0);
-                auto _gboxes  = bottom_gboxes.chip(i,0);
-                auto _glabels = bottom_glabels.chip(i,0);
-                Eigen::array<long,2> offset={0,0};
-                Eigen::array<long,2> extents={size,4};
-                Eigen::array<long,1> offset1={0};
-                Eigen::array<long,1> extents1={size};
-                auto gboxes             = _gboxes.slice(offset,extents);
-                auto glabels            = _glabels.slice(offset1,extents1);
-                auto out_boxes          = output_boxes_tensor.chip(i,0);
-                auto out_labels         = output_labels_tensor.chip(i,0);
-                auto out_scores         = output_scores_tensor.chip(i,0);
-                auto out_remove_indices = output_remove_indict_tensor.chip(i,0);
-                auto out_indices        = output_indict_tensor.chip(i,0);
-                auto res                = encode_unit(boxes,gboxes,glabels);
-
-                out_boxes           =  std::get<0>(res);
-                out_labels          =  std::get<1>(res);
-                out_scores          =  std::get<2>(res);
-                out_remove_indices  =  std::get<3>(res);
-                out_indices         =  std::get<4>(res);
+                results.emplace_back(async(launch::async,[i,&shard](){ shard(i,i+1);}));
             }
-		}
+        }
 	private:
 		float         pos_threshold;
 		float         neg_threshold;
@@ -197,6 +209,7 @@ class BoxesEncode1Op: public OpKernel {
 
 		void Compute(OpKernelContext* context) override
 		{
+            TIME_THISV1("BoxesEncode1");
 			const Tensor &_bottom_boxes   = context->input(0);
 			const Tensor &_bottom_gboxes  = context->input(1);
 			const Tensor &_bottom_glabels = context->input(2);
@@ -319,7 +332,7 @@ class DecodeBoxes1Op: public OpKernel {
 
 		void Compute(OpKernelContext* context) override
 		{
-            TIME_THIS();
+            TIME_THISV1("DecodeBoxes1");
 			const Tensor &bottom_boxes       = context->input(0);
 			const Tensor &bottom_regs        = context->input(1);
 			auto          bottom_regs_flat   = bottom_regs.flat<T>();

@@ -69,6 +69,7 @@ class MaskLineBboxesOp: public OpKernel {
 
 		void Compute(OpKernelContext* context) override
 		{
+            TIME_THISV1("MaskLineBboxes");
 			const Tensor &_mask= context->input(0);
 			const Tensor &_labels= context->input(1);
 			const Tensor &_lens = context->input(2);
@@ -90,6 +91,7 @@ class MaskLineBboxesOp: public OpKernel {
                 vector<bbox_t> res;
                 vector<int> res_labels;
                 vector<int> res_ids;
+                res.reserve(1024);
                 for(auto j=0; j<lens(i); ++j) {
                     const auto label = labels(i,j);
                     auto res0 = get_bboxes(mask.chip(i,0).chip(j,0));
@@ -99,7 +101,7 @@ class MaskLineBboxesOp: public OpKernel {
                         res_ids.insert(res_ids.begin(),res0.size(),j);
                     }
                 }
-                assert(res.size()==res_labels.size());
+			    OP_REQUIRES(context, res.size() == res_labels.size(), errors::InvalidArgument("size of bboxes should equal size of labels."));
                 out_bboxes.push_back(std::move(res));
                 out_labels.push_back(std::move(res_labels));
                 out_ids.push_back(std::move(res_ids));
@@ -143,7 +145,7 @@ class MaskLineBboxesOp: public OpKernel {
             auto itl = out_labels.begin();
             auto iti = out_ids.begin();
 
-			for(int i=0; i<batch_size; ++i,++itb,++itl) {
+			for(int i=0; i<batch_size; ++i,++itb,++itl,++iti) {
                 olens(i) = itl->size();
                 for(auto j=0; j<olens(i); ++j) {
                     obbox(i,j,0) = std::get<0>((*itb)[j]);
@@ -164,6 +166,7 @@ class MaskLineBboxesOp: public OpKernel {
             const auto y_delta = 1.0/h;
             const auto x_delta = 1.0/w;
             vector<bbox_t> res;
+            res.reserve(256);
 
             for(auto i=0; i<h; ++i) {
                 const auto ymin = i*y_delta;

@@ -5,6 +5,8 @@ _Pragma("once")
 #include <tuple>
 #include <vector>
 #include <boost/algorithm/clamp.hpp>
+#include <mutex>
+#include <future>
 /*
  * box:(ymin,xmin,ymax,xmax)
  */
@@ -266,10 +268,15 @@ class BoxesEncodeUnit {
 					out_scores(i) = 0;
                     outindex(i) = -1;
 				}
+                const auto kThreadNr = std::min({20,gdata_nr*data_nr/20000,gdata_nr});
+                const auto kDataPerThread = gdata_nr/kThreadNr;
 				/*
 				 * 遍历每一个ground truth box
 				 */
-				for(auto i=0; i<gdata_nr; ++i) {
+                std::mutex mtx;
+                std::list<std::future<void>> results;
+                auto shard = [&](int start,int limit) {
+				for(auto i=start; i<limit; ++i) {
 					const      Eigen::Tensor<T,1,Eigen::RowMajor> gbox= gboxes.chip(i,0);
 					const auto glabel          = glabels(i);
 					auto       max_index       = -1;
@@ -280,14 +287,12 @@ class BoxesEncodeUnit {
 					 */
 					for(auto j=0; j<data_nr; ++j) {
 						const Eigen::Tensor<T,1,Eigen::RowMajor> box       = boxes.chip(j,0);
-
                         /*
                          * Faster-RCNN原文认为边界框上的bounding box不仔细处理会引起很大的不会收敛的误差
                          */
                         if(is_cross_boundaries(box)) continue;
 
 						auto        jaccard   = bboxes_jaccardv1(gbox,box);
-						auto       &iou_index = iou_indexs[j];
 
 						if(jaccard<1E-8) continue;
 
@@ -296,17 +301,22 @@ class BoxesEncodeUnit {
 							max_index = j;
 						}
 
-						if(jaccard>iou_index.iou) {
-							iou_index.iou = jaccard;
-							iou_index.index = i;
-						}
-						if((jaccard < pos_threshold_) 
-								|| (jaccard<out_scores(j)) 
-								|| is_max_score[j]) //不覆盖特殊情况
-							continue;
-						out_scores(j)  =  jaccard;
-						out_labels(j)  =  glabel;
-						outindex(j)    =  i;
+						auto       &iou_index = iou_indexs[j];
+
+                        {
+                            std::lock_guard<std::mutex> g(mtx);
+                            if(jaccard>iou_index.iou) {
+                                iou_index.iou = jaccard;
+                                iou_index.index = i;
+                            }
+                            if((jaccard < pos_threshold_) 
+                                    || (jaccard<out_scores(j)) 
+                                    || is_max_score[j]) //不覆盖特殊情况
+                                continue;
+                            out_scores(j)  =  jaccard;
+                            out_labels(j)  =  glabel;
+                            outindex(j)    =  i;
+                        }
 					}
 					if(max_scores<1E-8) continue;
 					/*
@@ -314,13 +324,21 @@ class BoxesEncodeUnit {
 					 */
 					auto j = max_index;
 
-					if((out_scores(j) <= max_scores) || (!is_max_score[j])) {
-						out_scores(j) = max_scores;
-						out_labels(j) = glabel;
-						outindex(j) = i;
-						is_max_score[j] = true;
-					}
+                    {
+                        std::lock_guard<std::mutex> g(mtx);
+                        if((out_scores(j) <= max_scores) || (!is_max_score[j])) {
+                            out_scores(j) = max_scores;
+                            out_labels(j) = glabel;
+                            outindex(j) = i;
+                            is_max_score[j] = true;
+                        }
+                    }
 				} //end for
+                };
+                for(auto i=0; i<gdata_nr; i+=kDataPerThread) {
+                    results.emplace_back(std::async(std::launch::async,[i,gdata_nr,kDataPerThread,&shard](){shard(i,std::min(gdata_nr,i+kDataPerThread));}));
+                }
+                results.clear();
 
 				for(auto j=0; j<data_nr; ++j) {
 					const auto& iou_index = iou_indexs[j];
