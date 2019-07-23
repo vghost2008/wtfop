@@ -268,7 +268,7 @@ class BoxesEncodeUnit {
 					out_scores(i) = 0;
                     outindex(i) = -1;
 				}
-                const auto kThreadNr = std::min({20,gdata_nr*data_nr/20000,gdata_nr});
+                const auto kThreadNr = std::max(1,std::min({20,gdata_nr*data_nr/20000,gdata_nr}));
                 const auto kDataPerThread = gdata_nr/kThreadNr;
 				/*
 				 * 遍历每一个ground truth box
