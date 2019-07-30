@@ -22,6 +22,7 @@ ops.NotDifferentiable("IntHash")
 ops.NotDifferentiable("AnchorGenerator")
 ops.NotDifferentiable("AdjacentMatrixGenerator")
 ops.NotDifferentiable("BoxesMatchWithPred")
+ops.NotDifferentiable("SampleLabels")
 
 module_path = os.path.realpath(__file__)
 module_dir = os.path.dirname(module_path)
@@ -231,6 +232,12 @@ def position_embedding(size):
         out = tf.reshape(out,[1]+size)
     return out 
 
+def plane_position_embedding(size):
+    out = wtfop_module.plane_position_embedding(size=size)
+    if isinstance(size,list):
+        out = tf.reshape(out,[1]+size)
+    return out 
+
 def set_value(tensor,v,index):
     if index.get_shape().ndims is None or index.get_shape().ndims==0:
         index = tf.reshape(index,[-1])
@@ -300,6 +307,9 @@ def mask_line_bboxes(mask,labels,lens,max_output_nr=-1):
     if mask.dtype != tf.uint8:
         mask = tf.cast(mask,tf.uint8)
     return wtfop_module.mask_line_bboxes(mask=mask,labels=labels,lens=lens,max_output_nr=max_output_nr)
+
+def sample_labels(labels,ids,sample_nr=1024):
+    return wtfop_module.sample_labels(labels=labels,ids=ids,sample_nr=sample_nr)
 
 @ops.RegisterGradient("RoiPooling")
 def _roi_pool_grad(op, grad, _):

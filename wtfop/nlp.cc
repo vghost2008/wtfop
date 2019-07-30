@@ -176,3 +176,52 @@ class PositionEmbeddingOp: public OpKernel {
         }
 };
 REGISTER_KERNEL_BUILDER(Name("PositionEmbedding").Device(DEVICE_CPU).TypeConstraint<int32_t>("T"), PositionEmbeddingOp<CPUDevice, int32_t>);
+
+REGISTER_OP("PlanePositionEmbedding")
+    .Attr("T: {int32, int64}")
+    .Input("size: T")
+	.Output("output:float");
+
+template <typename Device, typename T>
+class PlanePositionEmbeddingOp: public OpKernel {
+	public:
+		explicit PlanePositionEmbeddingOp(OpKernelConstruction* context) : OpKernel(context) {
+		}
+
+		void Compute(OpKernelContext* context) override
+        {
+            const Tensor &_size = context->input(0);
+            const auto    size  = _size.template tensor<T,1>();
+
+            OP_REQUIRES(context, _size.dims() == 1, errors::InvalidArgument("size data must be 1-dimensional"));
+            OP_REQUIRES(context, _size.dim_size(0) == 2, errors::InvalidArgument("size dim size must be 2."));
+
+            const auto batch_size = 1;
+            const auto width      = size(1);
+            const auto height     = size(0);
+
+            TensorShape output_shape0({batch_size,height,width});
+            Tensor* output= NULL;
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, output_shape0, &output));
+
+            auto       o_tensor = output->template tensor<float,3>();
+
+            static const auto a = 0.1;
+            static const auto b = 0.2;
+            static const auto c = 0.3;
+
+            for(auto i=0; i<batch_size; ++i) {
+                for(auto j=0; j<height; ++j) {
+                    for(auto k=0; k<width; ++k) {
+                        const auto x = float(k)/width;
+                        const auto y = float(j)/width;
+                        const auto v = (1-x/a-y/b)*c;
+                        o_tensor(i,j,k) = v;
+                    }
+                }
+            }
+        }
+};
+REGISTER_KERNEL_BUILDER(Name("PlanePositionEmbedding").Device(DEVICE_CPU).TypeConstraint<int32_t>("T"), PlanePositionEmbeddingOp<CPUDevice, int32_t>);
+REGISTER_KERNEL_BUILDER(Name("PlanePositionEmbedding").Device(DEVICE_CPU).TypeConstraint<tensorflow::int64>("T"), PlanePositionEmbeddingOp<CPUDevice, tensorflow::int64>);

@@ -258,6 +258,25 @@ class WTFOPTest(tf.test.TestCase):
                 out = sess.run(out)
                 self.assertAllEqual(out,value)
 
+    def testSampleLabels(self):
+        print("Test sample labels")
+        ids = tf.placeholder(dtype=tf.int32,shape=[2,None])
+        labels = tf.ones_like(ids)
+        res = wop.sample_labels(labels=labels,ids=ids,sample_nr=8)
+        with self.test_session() as sess:
+            _ids = np.array([[0,0,0,0,0],[0,0,0,0,0]])
+            feed_dict = {ids:_ids}
+            r = sess.run(res,feed_dict=feed_dict)
+            wmlu.show_list(r)
+            _ids = np.array([[0,1,1,2,2],[1,0,0,1,0]])
+            feed_dict = {ids:_ids}
+            r = sess.run(res,feed_dict=feed_dict)
+            wmlu.show_list(r)
+            _ids = np.array([[1,1,1,2,2,2,2,0],[1,1,2,2,3,3,3,1]])
+            feed_dict = {ids:_ids}
+            r = sess.run(res,feed_dict=feed_dict)
+            wmlu.show_list(r)
+
     def testBoxesMatch(self):
         with self.test_session() as sess:
             #人工核算
