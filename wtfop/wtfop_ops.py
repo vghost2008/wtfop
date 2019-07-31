@@ -311,6 +311,9 @@ def mask_line_bboxes(mask,labels,lens,max_output_nr=-1):
 def sample_labels(labels,ids,sample_nr=1024):
     return wtfop_module.sample_labels(labels=labels,ids=ids,sample_nr=sample_nr)
 
+def merge_line_boxes(data,labels,bboxes,lens,threshold=0.5,dis_threshold=[0.1,0.1]):
+    return wtfop_module.merge_line_boxes(data=data,labels=labels,bboxes=bboxes,lens=lens,threshold=threshold,dis_threshold=dis_threshold)
+
 @ops.RegisterGradient("RoiPooling")
 def _roi_pool_grad(op, grad, _):
   data = op.inputs[0]

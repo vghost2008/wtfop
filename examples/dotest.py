@@ -312,6 +312,20 @@ class WTFOPTest(tf.test.TestCase):
             adj_mt = wop.adjacent_matrix_generator_by_iou(bboxes,0.5,True)
             self.assertAllEqual(adj_mt.eval(),[[0,1,0,0],[1,0,1,0],[0,1,0,1],[0,0,1,0]])
 
+    def test_merge_line_bboxes(self):
+        print("test merge line bboxes")
+        with self.test_session() as sess:
+            bboxes = np.array([[[0.0,0.0,0.01,0.5],[0.01,0.01,0.11,0.4],[0.4,0.0,0.41,0.5],[0.4,0.51,0.41,0.9]]])
+            datas = np.array([[[0.0,0.0,0.00,0.0],[0.00,0.00,0.0,0.0],[0.0,0.0,0.00,0.0],[1.4,1.51,1.41,1.9]]])
+            datas = np.array([[[0.0,0.0,0.00,0.0],[0.00,0.00,0.0,0.0],[0.0,0.0,0.00,0.0],[0.0,0.0,0.00,0.0]]])
+            labels = np.array([[1,1,1,1]])
+            lens = np.array([4])
+            threshold = 0.5
+            dis_threshold = [0.1,0.1]
+            ids = wop.merge_line_boxes(data=datas,labels=labels,bboxes=bboxes,lens=lens,threshold=threshold,dis_threshold=dis_threshold)
+            r_ids = sess.run(ids)
+            print(r_ids)
+
 if __name__ == "__main__":
     random.seed(int(time.time()))
     tf.test.main()
