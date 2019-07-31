@@ -98,7 +98,7 @@ class MaskLineBboxesOp: public OpKernel {
                     if(!res0.empty()) {
                         res.insert(res.end(),res0.begin(),res0.end());
                         res_labels.insert(res_labels.end(),res0.size(),label);
-                        res_ids.insert(res_ids.end(),res0.size(),j);
+                        res_ids.insert(res_ids.end(),res0.size(),j+1);
                     }
                 }
 			    OP_REQUIRES(context, res.size() == res_labels.size(), errors::InvalidArgument("size of bboxes should equal size of labels."));

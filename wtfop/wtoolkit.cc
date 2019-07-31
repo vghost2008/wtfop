@@ -448,3 +448,131 @@ class SampleLabelsOp: public OpKernel {
 };
 REGISTER_KERNEL_BUILDER(Name("SampleLabels").Device(DEVICE_CPU).TypeConstraint<int>("T"), SampleLabelsOp<CPUDevice, int>);
 REGISTER_KERNEL_BUILDER(Name("SampleLabels").Device(DEVICE_CPU).TypeConstraint<tensorflow::int64>("T"), SampleLabelsOp<CPUDevice, tensorflow::int64>);
+
+/*
+ * data:[batch_size,nr,X]
+ * labels:[batch_size,nr]
+ * bboxes:[batch_size,nr,4]
+ * threshold:
+ * dis_threshold:[2](x,y)
+ * output:[batch_size,nr]
+ */
+REGISTER_OP("MergeLineBoxes")
+    .Attr("T: {int32, int64}")
+	.Attr("threshold:float")
+	.Attr("dis_threshold:list(float)")
+    .Input("data: float")
+    .Input("labels: T")
+    .Input("bboxes:float")
+	.Output("ids:T")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+            const auto input_shape0 = c->input(1);
+			c->set_output(0, input_shape0);
+			return Status::OK();
+			});
+
+template <typename Device, typename T>
+class MergeLineBoxesOp: public OpKernel {
+    public:
+        explicit MergeLineBoxesOp(OpKernelConstruction* context) : OpKernel(context) {
+            OP_REQUIRES_OK(context, context->GetAttr("dis_threshold", &dis_threshold_));
+            OP_REQUIRES_OK(context, context->GetAttr("threshold", &threshold_));
+            OP_REQUIRES(context, dis_threshold_.size() == 2, errors::InvalidArgument("Threshold must be contains two elements."));
+        }
+        void Compute(OpKernelContext* context) override
+        {
+            const Tensor &_data      = context->input(0);
+            const Tensor &_labels    = context->input(1);
+            const Tensor &_bboxes    = context->input(2);
+            auto          data       = _data.tensor<T,3>();
+            auto          bboxes     = _bboxes.tensor<float,3>();
+            auto          labels     = _labels.tensor<T,2>();
+            auto          batch_size = labels.dimension(0);
+
+            OP_REQUIRES(context, _labels.dims() == 2, errors::InvalidArgument("labels must be 2-dimensional"));
+            OP_REQUIRES(context, _data.dims() == 3, errors::InvalidArgument("data must be 3-dimensional"));
+            OP_REQUIRES(context, _bboxes.dims() == 3, errors::InvalidArgument("bboxes must be 3-dimensional"));
+
+
+            const auto data_nr = labels.dimension(1);
+            int dims_2d[] = {batch_size,data_nr};
+            TensorShape outshape0;
+
+            TensorShapeUtils::MakeShape(dims_2d, 2, &outshape0);
+            Tensor *output_data = NULL;
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_data));
+            auto out_tensor = output_data->tensor<T,3>();
+            list<future<vector<int>>> res;
+            for(auto i=0; i<batch_size; ++i) {
+                res.emplace_back(async(launch::async,&MergeLineBoxesOp<Device,T>::process_one_batch,data.chip(i,0),labels.chip(i,0),bboxes.chip(i,0));
+            }
+            for(auto i=0; i<batch_size; ++i) {
+                auto data = next(res.begin(),i)->get();
+                for(auto j=0; j<data_nr; ++j) {
+                    out_tensor(i,j) = data[j];
+                }
+            }
+        }
+        static auto get_distance(const Eigen::Tensor<float,1,Eigen::RowMajor>& box0,
+        const Eigen::Tensor<float,1,Eigen::RowMajor>& box1
+        ) {
+            float xdis;
+            const float ydis = fabs(box0(0)+box0(2)-box1(0)-box1(2))/2.0f;
+            if(box0(1)>=box1(3)) {
+                xdis = box0(1)-box1(3);
+            } else if(box0(3)<=box1(1)) {
+                xdis = box1(1)-box0(3);
+            } else {
+                xdis = 0.0f;
+            }
+            return make_pair(xdis,ydis);
+        }
+        static auto get_distance_matrix(const Eigen::Tensor<T,1,Eigen::RowMajor>& labels,
+        const Eigen::Tensor<float,2,Eigen::RowMajor>& bboxes) {
+            const auto kMaxDis = 1e8;
+            const auto data_nr = labels.dimension(0);
+            Eigen::Tensor<float,3,Eigen::RowMajor> dis(data_nr,data_nr,2); //dis(x,y)
+            dis.setConstant(kMaxDis);
+            for(auto i=0; i<data_nr; ++i) {
+                for(auto j=i+1; j<data_nr; ++j) {
+                    if(labels(i) != j) continue;
+                    const auto dis = get_distance(bboxes.chip(i,0),bboxes.chip(j,0));
+                    dis(i,j,0) = dis.first;
+                    dis(i,j,0) = dis.second;
+                }
+            }
+            return dis;
+        }
+        static float feature_map_distance(const Eigen::Tensor<float,1,Eigen::RowMajor>& data0, const Eigen::Tensor<float,1,Eigen::RowMajor>& data1) {
+            auto dis = (data0-data1).sqrt().mean();
+            return 1.0-2.0/(1+exp(dis));
+        }
+        static vector<int> process_one_batch(const Eigen::Tensor<float,2,Eigen::RowMajor>& data,
+        const Eigen::Tensor<T,1,Eigen::RowMajor>& labels,
+        const Eigen::Tensor<float,2,Eigen::RowMajor>& bboxes) {
+            const auto data_nr = ids.dimension(0);
+            const auto dis_matrix = get_distance_matrix(labels,bboxes);
+            vector<int> ids(data_nr,0);
+            int id = 0;
+
+            for(auto i=0; i<data_nr; ++i) {
+                if(ids[i] == 0) {
+                    ids[i] = ++id;
+                }
+                const Eigen::Tensor<float,1,Eigen::RowMajor> data_i = data.chip(i,0);
+                for(auto j=0; j<data_nr; ++j) {
+                    if((dis_matrix(i,j,0) < dis_threshold_[0])
+                        &&(dis_matrix(i,j,0) < dis_threshold_[0])
+                        && (feature_map_distance(data_i,data.chip(j,0))<threshold_){
+                            ids[j] = ids[i];
+                    }
+                }
+            }
+            return ids;
+        }
+    private:
+        vector<float> dis_threshold_;
+        float threshold_ = 0.0f;
+};
+REGISTER_KERNEL_BUILDER(Name("MergeLineBoxes").Device(DEVICE_CPU).TypeConstraint<int>("T"), MergeLineBoxesOp<CPUDevice, int>);
+REGISTER_KERNEL_BUILDER(Name("MergeLineBoxes").Device(DEVICE_CPU).TypeConstraint<tensorflow::int64>("T"), MergeLineBoxesOp<CPUDevice, tensorflow::int64>);
