@@ -7,6 +7,8 @@ import numpy as np
 import wml_utils as wmlu
 import random
 import time
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = ''
 
 class WTFOPTest(tf.test.TestCase):
 
@@ -261,19 +263,22 @@ class WTFOPTest(tf.test.TestCase):
     def testSampleLabels(self):
         print("Test sample labels")
         ids = tf.placeholder(dtype=tf.int32,shape=[2,None])
-        labels = tf.ones_like(ids)
+        labels = tf.placeholder(dtype=tf.int32,shape=[2,None])
         res = wop.sample_labels(labels=labels,ids=ids,sample_nr=8)
         with self.test_session() as sess:
             _ids = np.array([[0,0,0,0,0],[0,0,0,0,0]])
-            feed_dict = {ids:_ids}
+            _labels = np.ones_like(_ids);
+            feed_dict = {ids:_ids,labels:_labels}
             r = sess.run(res,feed_dict=feed_dict)
             wmlu.show_list(r)
             _ids = np.array([[0,1,1,2,2],[1,0,0,1,0]])
-            feed_dict = {ids:_ids}
+            _labels = np.ones_like(_ids);
+            feed_dict = {ids:_ids,labels:_labels}
             r = sess.run(res,feed_dict=feed_dict)
             wmlu.show_list(r)
-            _ids = np.array([[1,1,1,2,2,2,2,0],[1,1,2,2,3,3,3,1]])
-            feed_dict = {ids:_ids}
+            _ids = np.array([[1,1,3,3,2,2,2,0],[1,1,2,2,3,3,3,1]])
+            _labels = np.array([[1,1,1,1,2,2,2,0],[1,1,1,1,3,3,3,1]])
+            feed_dict = {ids:_ids,labels:_labels}
             r = sess.run(res,feed_dict=feed_dict)
             wmlu.show_list(r)
 

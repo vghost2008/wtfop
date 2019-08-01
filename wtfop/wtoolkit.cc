@@ -354,7 +354,9 @@ class SampleLabelsOp: public OpKernel {
             auto out_tensor = output_data->tensor<T,3>();
             list<future<vector<tuple<T,T,T>>>> res;
             for(auto i=0; i<batch_size; ++i) {
-                res.emplace_back(async(launch::async,&SampleLabelsOp<Device,T>::sample_one_batch,Eigen::Tensor<T,1,Eigen::RowMajor>(ids.chip(i,0)),sample_nr_));
+                res.emplace_back(async(launch::async,&SampleLabelsOp<Device,T>::sample_one_batch,Eigen::Tensor<T,1,Eigen::RowMajor>(ids.chip(i,0)),
+                Eigen::Tensor<T,1,Eigen::RowMajor>(labels.chip(i,0)),
+                sample_nr_));
             }
             for(auto i=0; i<batch_size; ++i) {
                 auto data = next(res.begin(),i)->get();
@@ -365,8 +367,9 @@ class SampleLabelsOp: public OpKernel {
                 }
             }
         }
-        static vector<tuple<T,T,T>> sample_one_batch(const Eigen::Tensor<T,1,Eigen::RowMajor>& ids,int sample_nr) {
+        static vector<tuple<T,T,T>> sample_one_batch(const Eigen::Tensor<T,1,Eigen::RowMajor>& ids,const Eigen::Tensor<T,1,Eigen::RowMajor>& labels,int sample_nr) {
             map<T,vector<int>> datas;
+            map<T,T> id_to_label;
             const auto data_nr = ids.dimension(0);
             for(auto i=0; i<ids.dimension(0); ++i) {
                 const auto id = ids(i);
@@ -376,6 +379,7 @@ class SampleLabelsOp: public OpKernel {
                     it->second.push_back(i);
                 } else {
                     datas[id] = vector<int>({i});
+                    id_to_label[id] = labels[i];
                 }
             }
             if(datas.size() == 0) {
@@ -411,13 +415,32 @@ class SampleLabelsOp: public OpKernel {
                 std::mt19937 gen(rd());
                 std::uniform_int_distribution<> dis(0, datas.size()-1);
                 std::uniform_int_distribution<> dis1;
-                generate(res.begin(),res.end(),[&gen,&dis,&dis1,&datas](){
-                        int index0;
-                        int index1;
-                        int index00;
-                        int index01;
+                generate(res.begin(),res.end(),[&gen,&dis,&dis1,&datas,&id_to_label](){
+                        int        index0  = dis(gen);
+                        int        index1;
+                        int        index00;
+                        int        index01;
+                        const auto id0     = next(datas.begin(),index0)->first;
+                        const auto label0  = id_to_label[id0];
+                        vector<int> id1s;
 
-                        std::tie(index0,index1) = sample_two_int(dis.b(),[&dis,&gen]{ return dis(gen);});
+                        for(auto& item:id_to_label) {
+                            if((item.first != id0) && (item.second == label0)) {
+                                id1s.push_back(item.first);
+                            }
+                        }
+                        if(!id1s.empty()) {
+                            const auto id1 = id1s[dis1(gen)%id1s.size()];
+                            index1 = distance(datas.begin(),datas.find(id1));
+                        } else {
+                            index1 = dis(gen);
+                            if(index1 == index0) {
+                                if(index1>0)
+                                    index1 = 0;
+                                else
+                                    index1 = 1;
+                            }
+                        }
 
                         const auto& data0 = next(datas.begin(),index0)->second;
                         const auto& data1 = next(datas.begin(),index1)->second;
@@ -516,8 +539,10 @@ class MergeLineBoxesOp: public OpKernel {
             out_tensor.setConstant(0);
             for(auto i=0; i<batch_size; ++i) {
                 auto data = next(res.begin(),i)->get();
+                cout<<"LEN:"<<lens(i)<<endl;
                 for(auto j=0; j<lens(i); ++j) {
                     out_tensor(i,j) = data[j];
+                    cout<<j<<":"<<data[j]<<endl;
                 }
             }
         }
@@ -526,6 +551,7 @@ class MergeLineBoxesOp: public OpKernel {
         ) {
             float xdis;
             const float ydis = fabs(box0(0)+box0(2)-box1(0)-box1(2))/2.0f;
+
             if(box0(1)>=box1(3)) {
                 xdis = box0(1)-box1(3);
             } else if(box0(3)<=box1(1)) {
@@ -541,18 +567,42 @@ class MergeLineBoxesOp: public OpKernel {
             Eigen::Tensor<float,3,Eigen::RowMajor> dis(data_nr,data_nr,2); //dis(x,y)
             dis.setConstant(kMaxDis);
             for(auto i=0; i<data_nr; ++i) {
+                dis(i,i,0) = 0;
+                dis(i,i,1) = 0;
                 for(auto j=i+1; j<data_nr; ++j) {
                     if(labels(i) != labels(j)) continue;
                     const auto b_dis = get_distance(bboxes.chip(i,0),bboxes.chip(j,0));
                     dis(i,j,0) = b_dis.first;
-                    dis(i,j,0) = b_dis.second;
+                    dis(i,j,1) = b_dis.second;
+                    dis(j,i,0) = b_dis.first;
+                    dis(j,i,1) = b_dis.second;
                 }
             }
             return dis;
         }
         static float feature_map_distance(const Eigen::Tensor<float,1,Eigen::RowMajor>& data0, const Eigen::Tensor<float,1,Eigen::RowMajor>& data1) {
-            const Eigen::Tensor<float,0,Eigen::RowMajor> dis = (data0-data1).sqrt().mean();
-            return 1.0-2.0/(1+exp(dis(0)));
+            const Eigen::Tensor<float,0,Eigen::RowMajor> dis = (data0-data1).square().mean();
+            //return  1.0-2.0/(1+exp(dis(0)));
+            auto res = 1.0-2.0/(1+exp(dis(0)));
+            cout<<"FMD:"<<dis(0)<<","<<res<<endl;
+            return res;
+        }
+        template<typename DT>
+        void label_one(const DT& dis_matrix,
+        int index,
+        const Eigen::Tensor<float,1,Eigen::RowMajor>& data_index,
+        const Eigen::Tensor<float,2,Eigen::RowMajor>& data,
+        vector<int>& ids,
+        int data_nr) {
+            for(auto j=0; j<data_nr; ++j) {
+                if(ids[j]>0) continue;
+                if((dis_matrix(index,j,0) < dis_threshold_[0])
+                        &&(dis_matrix(index,j,1) < dis_threshold_[1])
+                        && (feature_map_distance(data_index,data.chip(j,0))<threshold_)){
+                    ids[j] = ids[index];
+                    label_one(dis_matrix,j,data.chip(j,0),data,ids,data_nr);
+                }
+            }
         }
         vector<int> process_one_batch(const Eigen::Tensor<float,2,Eigen::RowMajor>& data,
         const Eigen::Tensor<T,1,Eigen::RowMajor>& labels,
@@ -566,13 +616,7 @@ class MergeLineBoxesOp: public OpKernel {
                     ids[i] = ++id;
                 }
                 const Eigen::Tensor<float,1,Eigen::RowMajor> data_i = data.chip(i,0);
-                for(auto j=0; j<data_nr; ++j) {
-                    if((dis_matrix(i,j,0) < dis_threshold_[0])
-                        &&(dis_matrix(i,j,0) < dis_threshold_[0])
-                        && (feature_map_distance(data_i,data.chip(j,0))<threshold_)){
-                            ids[j] = ids[i];
-                    }
-                }
+                label_one(dis_matrix,i,data_i,data,ids,data_nr);
             }
             return ids;
         }
