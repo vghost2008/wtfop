@@ -8,7 +8,7 @@ import wml_utils as wmlu
 import random
 import time
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 class WTFOPTest(tf.test.TestCase):
 
