@@ -385,7 +385,6 @@ class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
 					feat_h   =  log(feat_h/href)/prio_scaling_[2];
 					feat_w   =  log(feat_w/wref)/prio_scaling_[3];
 				}
-                printf("use cpu...\n\n\n\n");
 				return std::make_tuple(out_boxes,out_labels,out_scores,out_remove_indices,outindex);
 			}
 	private:
@@ -408,12 +407,12 @@ class BoxesEncodeUnit<Eigen::GpuDevice,T> {
              }
         void operator()(
                 const T* boxes,const T* gboxes,const int* glabels,
-                float* out_bboxes,int* out_labels,float* out_scores,bool* out_remove_indict,int* out_indict,
+                float* out_bboxes,int* out_labels,float* out_scores,bool* out_remove_indict,int* out_index,
                 int gdata_nr,int data_nr
                 )
         {
             get_encodes(gboxes,boxes,glabels,
-                    out_bboxes,out_scores,out_labels,out_remove_indict,out_indict,prio_scaling_.data(),
+                    out_bboxes,out_scores,out_labels,out_remove_indict,out_index,prio_scaling_.data(),
                     gdata_nr,data_nr,neg_threshold_,pos_threshold_);
         }
     private:

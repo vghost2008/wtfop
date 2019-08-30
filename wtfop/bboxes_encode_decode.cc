@@ -125,8 +125,7 @@ class BoxesEncodeOp<CPUDevice,T>: public OpKernel {
 			auto output_remove_indict_tensor  =  output_remove_indict->template tensor<bool,2>();
 			auto output_indict_tensor         =  output_indict->template tensor<int,2>();
 
-            BoxesEncodeUnit<Device,T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
-            cout<<bottom_gsize(0)<<endl<<endl;
+            BoxesEncodeUnit<CPUDevice,T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
             auto shard = [&](int64 start,int64 limit){
                 for(auto i=start; i<limit; ++i) {
 
@@ -176,7 +175,7 @@ class BoxesEncodeOp<GPUDevice,T>: public OpKernel {
 
 		void Compute(OpKernelContext* context) override
 		{
-            TIME_THISV1("BoxesEncode");
+            TIME_THISV1("BoxesEncodeGPU");
 			const Tensor &_bottom_boxes   = context->input(0);
 			const Tensor &_bottom_gboxes  = context->input(1);
 			const Tensor &_bottom_glabels = context->input(2);
@@ -221,12 +220,12 @@ class BoxesEncodeOp<GPUDevice,T>: public OpKernel {
 			auto output_indict_tensor         =  output_indict->template tensor<int,2>();
 
             BoxesEncodeUnit<GPUDevice,T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
-            //for(auto i=0; i<batch_size; ++i) {
-            auto shard = [&](int64 start,int64 limit){
-                for(auto i=start; i<limit; ++i) {
-
+            for(auto i=0; i<batch_size; ++i) {
+            //auto shard = [&](int64 start,int64 limit){
+             //   for(auto i=start; i<limit; ++i) {
+                    
                     auto size    = bottom_gsize(i);
-                    auto boxes   = bottom_boxes.dimension(0)==batch_size?chip_data(bottom_boxes,i):chip_data(bottom_gboxes,0);
+                    auto boxes   = bottom_boxes.dimension(0)==batch_size?chip_data(bottom_boxes,i):chip_data(bottom_boxes,0);
                     auto gboxes  = chip_data(bottom_gboxes,i);
                     auto glabels = chip_data(bottom_glabels,i);
                     encode_unit(boxes,gboxes,glabels,
@@ -238,18 +237,18 @@ class BoxesEncodeOp<GPUDevice,T>: public OpKernel {
                             size,bottom_boxes.dimension(1)
                             );
                 }
-            };
+/*            };
             list<future<void>> results;
             for(auto i=0; i<batch_size; ++i) {
                 results.emplace_back(async(launch::async,[i,&shard](){ shard(i,i+1);}));
-            }
+            }*/
         }
 	private:
 		float         pos_threshold;
 		float         neg_threshold;
 		vector<float> prio_scaling;
 };
-//REGISTER_KERNEL_BUILDER(Name("BoxesEncode").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesEncodeOp<CPUDevice, float>);
+REGISTER_KERNEL_BUILDER(Name("BoxesEncode").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesEncodeOp<CPUDevice, float>);
 #ifdef GOOGLE_CUDA
 REGISTER_KERNEL_BUILDER(Name("BoxesEncode").Device(DEVICE_GPU).TypeConstraint<float>("T"), BoxesEncodeOp<GPUDevice, float>);
 #endif
@@ -286,7 +285,10 @@ REGISTER_OP("BoxesEncode1")
             });
 
 template <typename Device, typename T>
-class BoxesEncode1Op: public OpKernel {
+class BoxesEncode1Op{
+};
+template <typename T>
+class BoxesEncode1Op<CPUDevice,T>: public OpKernel {
 	public:
         struct IOUIndex{
             int index;
@@ -337,7 +339,7 @@ class BoxesEncode1Op: public OpKernel {
 			auto output_scores_tensor        = output_scores->template tensor<T,1>();
 			auto output_remove_indict_tensor = output_remove_indict->template tensor<bool,1>();
 
-			BoxesEncodeUnit<Device,T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
+			BoxesEncodeUnit<CPUDevice,T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
 			auto &boxes              = bottom_boxes;
 			auto &gboxes             = bottom_gboxes;
 			auto &glabels            = bottom_glabels;
@@ -352,6 +354,78 @@ class BoxesEncode1Op: public OpKernel {
 			out_scores          =  std::get<2>(res);
 			out_remove_indices  =  std::get<3>(res);
 		}
+	private:
+		float         pos_threshold;
+		float         neg_threshold;
+		vector<float> prio_scaling;
+};
+template <typename T>
+class BoxesEncode1Op<GPUDevice,T>: public OpKernel {
+	public:
+        struct IOUIndex{
+            int index;
+            float iou;
+        };
+		explicit BoxesEncode1Op(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("pos_threshold", &pos_threshold));
+			OP_REQUIRES_OK(context, context->GetAttr("neg_threshold", &neg_threshold));
+			OP_REQUIRES_OK(context, context->GetAttr("prio_scaling", &prio_scaling));
+			OP_REQUIRES(context, prio_scaling.size() == 4, errors::InvalidArgument("prio scaling data must be shape[4]"));
+		}
+
+		void Compute(OpKernelContext* context) override
+        {
+            TIME_THISV1("BoxesEncode1");
+            const Tensor &_bottom_boxes   = context->input(0);
+            const Tensor &_bottom_gboxes  = context->input(1);
+            const Tensor &_bottom_glabels = context->input(2);
+            auto          bottom_boxes    = _bottom_boxes.template tensor<T,2>();
+            auto          bottom_gboxes   = _bottom_gboxes.template tensor<T,2>();
+            auto          bottom_glabels  = _bottom_glabels.template tensor<int,1>();
+            const auto    data_nr         = _bottom_boxes.dim_size(0);
+
+            OP_REQUIRES(context, _bottom_boxes.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
+            OP_REQUIRES(context, _bottom_gboxes.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
+            OP_REQUIRES(context, _bottom_glabels.dims() == 1, errors::InvalidArgument("labels data must be 1-dimensional"));
+
+            int           dims_2d[2]            = {int(data_nr),4};
+            int           dims_1d[1]            = {int(data_nr)};
+            TensorShape   outshape0;
+            TensorShape   outshape1;
+            Tensor       *output_boxes          = NULL;
+            Tensor       *output_labels         = NULL;
+            Tensor       *output_scores         = NULL;
+            Tensor       *output_remove_indict  = NULL;
+            vector<IOUIndex>   iou_indexs(data_nr,IOUIndex({-1,0.0})); //默认box不与任何ground truth box相交，iou为0
+
+            TensorShapeUtils::MakeShape(dims_2d, 2, &outshape0);
+            TensorShapeUtils::MakeShape(dims_1d, 1, &outshape1);
+
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_boxes));
+            OP_REQUIRES_OK(context, context->allocate_output(1, outshape1, &output_labels));
+            OP_REQUIRES_OK(context, context->allocate_output(2, outshape1, &output_scores));
+            OP_REQUIRES_OK(context, context->allocate_output(3, outshape1, &output_remove_indict));
+            auto output_boxes_tensor         = output_boxes->template tensor<T,2>();
+            auto output_labels_tensor        = output_labels->template tensor<int,1>();
+            auto output_scores_tensor        = output_scores->template tensor<T,1>();
+            auto output_remove_indict_tensor = output_remove_indict->template tensor<bool,1>();
+
+            BoxesEncodeUnit<GPUDevice,T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
+            auto size    = bottom_gboxes.dimension(0);
+            auto boxes   = bottom_boxes.data();
+            auto gboxes  = bottom_gboxes.data();
+            auto glabels = bottom_glabels.data();
+            encode_unit(boxes,gboxes,glabels,
+                    output_boxes_tensor.data(),
+                    output_labels_tensor.data(),
+                    output_scores_tensor.data(),
+                    output_remove_indict_tensor.data(),
+                    nullptr,
+                    size,bottom_boxes.dimension(0)
+                    );
+           //cout<<"USE GPU encode1"<<endl;
+        }
 	private:
 		float         pos_threshold;
 		float         neg_threshold;
@@ -389,7 +463,7 @@ class BoxesEncode1GradOp: public OpKernel {
 
 			auto output_grad_flat = output_grad->template flat<T>();
 			auto num_elements     = output_grad->NumElements();
-			cout<<"num elements:"<<num_elements<<","<<bottom_boxes.dims()<<","<<bottom_boxes.dim_size(0)<<","<<bottom_boxes.dim_size(1)<<endl;
+			//cout<<"num elements:"<<num_elements<<","<<bottom_boxes.dims()<<","<<bottom_boxes.dim_size(0)<<","<<bottom_boxes.dim_size(1)<<endl;
 
             for(auto i=0; i<num_elements; ++i)
                 output_grad_flat(i) = 0.0f;
@@ -401,7 +475,7 @@ class BoxesEncode1GradOp: public OpKernel {
 REGISTER_KERNEL_BUILDER(Name("BoxesEncode1").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesEncode1Op<CPUDevice, float>);
 REGISTER_KERNEL_BUILDER(Name("BoxesEncode1Grad").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesEncode1GradOp<CPUDevice, float>);
 #ifdef GOOGLE_CUDA
-//REGISTER_KERNEL_BUILDER(Name("BoxesEncode1").Device(DEVICE_GPU).TypeConstraint<float>("T"), BoxesEncode1Op<GPUDevice, float>);
+REGISTER_KERNEL_BUILDER(Name("BoxesEncode1").Device(DEVICE_GPU).TypeConstraint<float>("T"), BoxesEncode1Op<GPUDevice, float>);
 #endif
 /*
  * bottom_boxes:[Nr,4](ymin,xmin,ymax,xmax) proposal box,相对坐标

@@ -12,6 +12,12 @@ typedef Eigen::GpuDevice GPUDevice;
 		printf("Error:%s:%d coda: %d, reson: %s\n",__FILE__,__LINE__,error,cudaGetErrorString(error)); \
 	} \
 }
+#define CHECK_CUDA_ERRORS(a) do { \
+if (cudaSuccess != (a)) { \
+    fprintf(stderr, "Cuda runtime error in line %d of file %s \
+    : %s \n", __LINE__, __FILE__, cudaGetErrorString(cudaGetLastError()) ); \
+} \
+} while(0)
 
 template<typename GPUTensor,typename CPUTensor>
 bool assign_cpu_to_gpu(GPUTensor& lhv,const CPUTensor& rhv)
@@ -167,7 +173,8 @@ struct MemBuddy
 template<typename T>
 struct CudaDelete{
     void operator()(T* p)const{
-        cudaFree(p);
+        if(nullptr != p) 
+            cudaFree(p);
     }
 };
 template<typename T>
@@ -199,7 +206,6 @@ template<typename T>
 void show_cuda_data(const T* data,size_t size, int col_nr=20,const std::string& name="cuda_data")
 {
     T* h_data = new T[size];
-    cudadevicesynchronize();
     CHECK_OK(cudaMemcpy(h_data,data,sizeof(T)*size,cudaMemcpyDeviceToHost));
     std::cout<<name<<std::endl;
     for(auto i=0; i<size;) {
@@ -209,4 +215,26 @@ void show_cuda_data(const T* data,size_t size, int col_nr=20,const std::string& 
         std::cout<<std::endl;
     }
     delete[] h_data;
+}
+template<typename T>
+void show_host_data(const T* h_data,size_t size, int col_nr=20,const std::string& name="cuda_data")
+{
+    std::cout<<name<<std::endl;
+    for(auto i=0; i<size;) {
+        for(auto j=0; (j<col_nr)&&(i<size); ++j,++i) {
+            std::cout<<h_data[i]<<" ";
+        }
+        std::cout<<std::endl;
+    }
+}
+template<typename T>
+__device__ void d_show_cuda_data(const T* data,size_t size, int col_nr=20,const char* name="cuda_data")
+{
+    printf("%s\n",name);
+    for(auto i=0; i<size;) {
+        for(auto j=0; (j<col_nr)&&(i<size); ++j,++i) {
+            printf("%.2f  ",float(data[i]));
+        }
+        printf("\n");
+    }
 }
