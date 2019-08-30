@@ -178,13 +178,14 @@ class WTFOPTest(tf.test.TestCase):
             boxes = tf.boolean_mask(boxes,keep_indices)
             out_boxes = tf.boolean_mask(out_boxes,keep_indices)
 
-            new_boxes = decode_boxes1(boxes,out_boxes)
+            with tf.device("/gpu:0"):
+                new_boxes = decode_boxes1(boxes,out_boxes)
             out_new_boxes= new_boxes.eval()
             target_new_boxes = np.array([[0.,0.,0.2,0.2],
                                          [0.09999999,0.09999999,0.4,0.4],
                                          [0.6999999,0.7,0.9,0.8],
                                          [0.3,0.3,0.5,0.6]])
-            self.assertAllClose(a=out_new_boxes,b=target_new_boxes,atol=1e-5,rtol=0.)'''
+            self.assertAllClose(a=out_new_boxes,b=target_new_boxes,atol=1e-5,rtol=0.)
 
     def testEncodeBoxesSpeed(self):
         config = tf.ConfigProto()
@@ -224,24 +225,28 @@ class WTFOPTest(tf.test.TestCase):
                 out_boxes, cout_labels, cout_scores, out_remove_indices,cout_indices = sess.run([out_boxes, out_labels, out_scores, out_remove_indices,indices])
             with wmlu.TimeThis("GPU"):
                 out_boxes, gout_labels, gout_scores, out_remove_indices,gout_indices = sess.run([out_boxes0, out_labels0, out_scores0, out_remove_indices0,indices0])
-            '''print("gboxes")
-            wmlu.show_nparray(np_gboxes0,format="{:.3f}")
-            wmlu.show_nparray(np_labels0)
-            print("boxes")
-            wmlu.show_nparray(np_boxes0,format="{:.3f}")
-            #print("lens")
-            #wmlu.show_list(np_lens)
-            print("cpu labels and indices")
-            wmlu.show_nparray(cout_labels)
-            wmlu.show_nparray(cout_indices)
-            wmlu.show_nparray(cout_scores,format="{:.3f}")
-            print("gpu labels and indices")
-            wmlu.show_nparray(gout_labels)
-            wmlu.show_nparray(gout_indices)
-            wmlu.show_nparray(gout_scores,format="{:.3f}")'''
             print(cout_indices.shape,gout_labels.shape)
             self.assertAllEqual(a=cout_indices,b=gout_indices)
-            self.assertAllEqual(a=cout_labels,b=gout_labels)
+            self.assertAllEqual(a=cout_labels,b=gout_labels)'''
+
+    def testDecodeBBoxes(self):
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True
+        with self.test_session(config=config) as sess:
+            nr = 100000
+            np_aboxes = self.get_random_boxes(nr)
+            np_regs = self.get_random_boxes(nr)
+            aboxes = tf.constant(np_aboxes,dtype=tf.float32)
+            regs = tf.constant(np_regs,dtype=tf.float32)
+            with tf.device("/gpu:0"):
+                gout = decode_boxes1(aboxes,regs)
+            with tf.device("/cpu:0"):
+                cout = decode_boxes1(aboxes,regs)
+            with wmlu.TimeThis("CPUDecode-----------"):
+                cout = sess.run(cout)
+            with wmlu.TimeThis("GPUDecode-----------"):
+                gout = sess.run(gout)
+            self.assertAllClose(a=cout,b=gout,atol=1e-4,rtol=0.)
 
 if __name__ == "__main__":
     random.seed(int(time.time()))

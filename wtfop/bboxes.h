@@ -420,6 +420,7 @@ class BoxesEncodeUnit<Eigen::GpuDevice,T> {
         const float              neg_threshold_;
         const std::vector<float> prio_scaling_;
 };
+void bboxes_decode_by_gpu(const float* anchor_bboxes,const float* regs,const float* prio_scaling,float* out_bboxes,size_t data_nr);
 #else
 #error "No cuda support"
 #endif

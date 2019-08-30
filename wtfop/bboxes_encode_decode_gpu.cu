@@ -12,6 +12,16 @@ __device__ std::tuple<T,T,T,T> cuda_box_minmax_to_cxywh(const T* box)
 {
 	return std::make_tuple((box[0]+box[2])/2.0,(box[1]+box[3])/2.0,box[2]-box[0],box[3]-box[1]);
 }
+template<typename T>
+__device__ std::tuple<T,T,T,T> cuda_box_cxywh_to_minmax(const T* box)
+{
+	return std::make_tuple(box[0]-box[2]/2.0,box[1]-box[3]/2.0,box[0]+box[2]/2.,box[1]+box[3]/2);
+}
+template<typename T>
+__device__ std::tuple<T,T,T,T> cuda_box_cxywh_to_minmax(T cy, T cx, T h, T w)
+{
+	return std::make_tuple(cy-h/2.0,cx-w/2.,cy+h/2.0,cx+w/2.0);
+}
 template<typename T0,typename T1>
 __device__ float cuda_bboxes_jaccard(const T0* box0, const T1* box1)
 {
@@ -29,6 +39,13 @@ __device__ float cuda_bboxes_jaccard(const T0* box0, const T1* box1)
 	if(union_vol<1E-6) return 0.0f;
 
 	return int_vol/union_vol;
+}
+template<typename T>
+__device__ T clamp(T v,T min, T max)
+{
+    if(v<min) return min;
+    if(v>max) return max;
+    return v;
 }
 template<typename T>
 __device__ inline bool cuda_is_cross_boundaries(const T* box) {
@@ -214,6 +231,44 @@ __global__ void get_bboxes_regression(float* out_boxes,const float* anchor_bboxe
     outbox[2] =  log(feat_h/href)/prio_scaling[2];
     outbox[3] =  log(feat_w/wref)/prio_scaling[3];
 }
+__global__ void bboxes_decode_kernel(const float* anchor_bboxes,const float* regs,const float* prio_scaling,float* out_bboxes,size_t data_nr)
+{
+    const auto b           = threadIdx.x+blockIdx.x *blockDim.x;
+
+    if(b>=data_nr) return;
+
+    const auto base_offset = b *4;
+    const auto regs_data   = regs+base_offset;
+    const auto box_data    = anchor_bboxes+base_offset;
+    float      y;
+    float      x;
+    float      href;
+    float      wref;
+    auto xywh = cuda_box_minmax_to_cxywh(box_data);
+
+    y = std::get<0>(xywh);
+    x = std::get<1>(xywh);
+    href = std::get<2>(xywh);
+    wref = std::get<3>(xywh);
+
+    auto cy          = clamp<float>(regs_data[0]*prio_scaling[0],-10.0f,10.0f)*href+y;
+    auto cx          = clamp<float>(regs_data[1]*prio_scaling[1],-10.0f,10.0f)*wref+x;
+    auto h           = href *exp(clamp<float>(regs_data[2]*prio_scaling[2],-10.0,10.0));
+    auto w           = wref *exp(clamp<float>(regs_data[3]*prio_scaling[3],-10.0,10.0));
+    auto output_data = out_bboxes + base_offset;
+
+    auto minmax = cuda_box_cxywh_to_minmax(cy,cx,h,w);
+
+    output_data[0] = clamp<float>(std::get<0>(minmax),0.0,1.0);
+    output_data[1] = clamp<float>(std::get<1>(minmax),0.0,1.0);
+    output_data[2] = clamp<float>(std::get<2>(minmax),0.0,1.0);
+    output_data[3] = clamp<float>(std::get<3>(minmax),0.0,1.0); 
+
+    if(output_data[0]>output_data[2]) 
+        output_data[2] = output_data[0];
+    if(output_data[1]>output_data[3])
+        output_data[3] = output_data[1];
+}
 __host__ void get_encodes(const float* gbboxes,const float* anchor_bboxes,const int* glabels,
 float* out_boxes,float* out_scores,int* out_labels,bool* out_remove_indices,int* out_index,const float* prio_scaling,
 size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold)
@@ -262,5 +317,15 @@ size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold)
 
     CHECK_CUDA_ERRORS(cudaPeekAtLastError());
     cudaDeviceSynchronize();
+}
+void bboxes_decode_by_gpu(const float* anchor_bboxes,const float* regs,const float* prio_scaling,float* out_bboxes,size_t data_nr)
+{
+    cuda_unique_ptr<float> d_prio_scaling = make_cuda_unique<float>(prio_scaling,4);
+    const auto block_size = std::min<size_t>(data_nr,128);
+    const auto grid_size = (data_nr+block_size-1)/block_size;
+
+    bboxes_decode_kernel<<<grid_size,block_size>>>(anchor_bboxes,regs,d_prio_scaling.get(),out_bboxes,data_nr);
+    CHECK_CUDA_ERRORS(cudaPeekAtLastError());
+   cudaDeviceSynchronize(); 
 }
 #endif

@@ -492,7 +492,10 @@ REGISTER_OP("DecodeBoxes1")
     .SetShapeFn(shape_inference::UnchangedShape);
 
 template <typename Device, typename T>
-class DecodeBoxes1Op: public OpKernel {
+class DecodeBoxes1Op{
+};
+template <typename T>
+class DecodeBoxes1Op<CPUDevice,T>: public OpKernel {
 	public:
 		explicit DecodeBoxes1Op(OpKernelConstruction* context) : OpKernel(context) {
 			OP_REQUIRES_OK(context,
@@ -548,4 +551,41 @@ class DecodeBoxes1Op: public OpKernel {
 	private:
 		std::vector<float> prio_scaling;
 };
+template <typename T>
+class DecodeBoxes1Op<GPUDevice,T>: public OpKernel {
+	public:
+		explicit DecodeBoxes1Op(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context,
+					context->GetAttr("prio_scaling", &prio_scaling));
+		}
+
+		void Compute(OpKernelContext* context) override
+		{
+            TIME_THISV1("DecodeBoxesGPU1");
+			const Tensor &bottom_boxes       = context->input(0);
+			const Tensor &bottom_regs        = context->input(1);
+			auto          bottom_regs_flat   = bottom_regs.flat<T>();
+			auto          bottom_boxes_flat  = bottom_boxes.flat<T>();
+
+			OP_REQUIRES(context, bottom_regs.dims() == 2, errors::InvalidArgument("regs data must be 2-dimensional"));
+			OP_REQUIRES(context, bottom_boxes.dims() == 2, errors::InvalidArgument("pos data must be 2-dimensional"));
+			OP_REQUIRES(context, bottom_boxes.dim_size(0)==bottom_regs.dim_size(0), errors::InvalidArgument("First dim size must be equal."));
+			OP_REQUIRES(context, bottom_boxes.dim_size(1)==4, errors::InvalidArgument("Boxes second dim size must be 4."));
+			OP_REQUIRES(context, bottom_regs.dim_size(1)==4, errors::InvalidArgument("Regs second dim size must be 4."));
+			const auto nr = bottom_regs.dim_size(0);
+
+			TensorShape output_shape = bottom_regs.shape();
+			// Create output tensors
+			Tensor* output_tensor = NULL;
+			OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
+
+			auto output = output_tensor->template flat<T>();
+            bboxes_decode_by_gpu(bottom_boxes_flat.data(),bottom_regs_flat.data(),prio_scaling.data(),output.data(),nr);
+		}
+	private:
+		std::vector<float> prio_scaling;
+};
 REGISTER_KERNEL_BUILDER(Name("DecodeBoxes1").Device(DEVICE_CPU).TypeConstraint<float>("T"), DecodeBoxes1Op<CPUDevice, float>);
+#ifdef GOOGLE_CUDA
+REGISTER_KERNEL_BUILDER(Name("DecodeBoxes1").Device(DEVICE_GPU).TypeConstraint<float>("T"), DecodeBoxes1Op<GPUDevice, float>);
+#endif
