@@ -456,7 +456,7 @@ class SampleLabelsOp: public OpKernel {
                 return res;
             }
         }
-        static auto sample_two_int(int max_val,auto func) {
+        static pair<int,int> sample_two_int(int max_val,auto func) {
             const int v0 = func();
             int v1 = func();
             if((0 == max_val) || (v0 != v1))
