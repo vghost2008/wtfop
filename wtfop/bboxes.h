@@ -389,6 +389,12 @@ class BoxesEncodeUnit {
 				}
 				return std::make_tuple(out_boxes,out_labels,out_scores,out_remove_indices,outindex);
 			}
+            void make_output(const Eigen::Tensor<T,2,Eigen::RowMajor>& boxes,
+		   const Eigen::Tensor<T,2,Eigen::RowMajor>& gboxes,
+		   const Eigen::Tensor<int,1,Eigen::RowMajor>& glabels,
+                auto                  out_boxes            = Eigen::Tensor<T,2,Eigen::RowMajor>(data_nr,4);
+                auto                  out_labels           = Eigen::Tensor<int,1,Eigen::RowMajor>(data_nr);
+                auto                  out_scores           = Eigen::Tensor<T,1,Eigen::RowMajor>(data_nr);
 	private:
 		const float              pos_threshold_;
 		const float              neg_threshold_;
