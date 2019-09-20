@@ -7,6 +7,8 @@ _Pragma("once")
 #include <boost/algorithm/clamp.hpp>
 #include <mutex>
 #include <future>
+#include <list>
+#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 /*
  * box:(ymin,xmin,ymax,xmax)
  */
@@ -224,8 +226,11 @@ auto encode_one_boxes(const Eigen::Tensor<T,1,Eigen::RowMajor>& gbox,const Eigen
     feat_w   =  log(feat_w/wref)/prio_scaling[3];
     return out_box;
 }
-template <typename T>
+template <typename Device,typename T>
 class BoxesEncodeUnit {
+};
+template <typename T>
+class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
 	public:
 		struct IOUIndex{
 			int index; //与当前box对应的gbbox序号
@@ -241,13 +246,6 @@ class BoxesEncodeUnit {
         inline bool is_cross_boundaries(const _T& box) {
             return (box(0)<0.0) || (box(1)<0.0) || (box(2)>1.0) ||(box(3)>1.0);
         }
-		/*
-		template<typename DT0,typename DT1,typename DT2>
-			auto operator()(
-					const DT0& boxes,
-					const DT1& gboxes,
-					const DT2& glabels,int data_nr,int gdata_nr)
-		 */
 		   auto operator()(
 		   const Eigen::Tensor<T,2,Eigen::RowMajor>& boxes,
 		   const Eigen::Tensor<T,2,Eigen::RowMajor>& gboxes,
@@ -400,3 +398,35 @@ class BoxesEncodeUnit {
 		const float              neg_threshold_;
 		const std::vector<float> prio_scaling_;
 };
+#ifdef GOOGLE_CUDA
+void get_encodes(const float* gbboxes,const float* anchor_bboxes,const int* glabels,
+float* out_boxes,float* out_scores,int* out_labels,bool* out_remove_indices,int* out_index,const float* prio_scaling,
+size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold);
+template <typename T>
+class BoxesEncodeUnit<Eigen::GpuDevice,T> {
+    public:
+        explicit BoxesEncodeUnit(float pos_threshold,float neg_threshold,const std::vector<float>& prio_scaling) 
+            :pos_threshold_(pos_threshold)
+             ,neg_threshold_(neg_threshold)
+             ,prio_scaling_(prio_scaling){
+                 assert(prio_scaling_.size() == 4);
+             }
+        void operator()(
+                const T* boxes,const T* gboxes,const int* glabels,
+                float* out_bboxes,int* out_labels,float* out_scores,bool* out_remove_indict,int* out_index,
+                int gdata_nr,int data_nr
+                )
+        {
+            get_encodes(gboxes,boxes,glabels,
+                    out_bboxes,out_scores,out_labels,out_remove_indict,out_index,prio_scaling_.data(),
+                    gdata_nr,data_nr,neg_threshold_,pos_threshold_);
+        }
+    private:
+        const float              pos_threshold_;
+        const float              neg_threshold_;
+        const std::vector<float> prio_scaling_;
+};
+void bboxes_decode_by_gpu(const float* anchor_bboxes,const float* regs,const float* prio_scaling,float* out_bboxes,size_t data_nr);
+#else
+#error "No cuda support"
+#endif

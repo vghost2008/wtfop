@@ -31,6 +31,20 @@ inline void default_log_func(const std::string& v)
         const std::chrono::steady_clock::time_point t_;
         bool autolog_ = false;
 };
+template<typename T>
+size_t dims_prod(const T& v,int execlude_dim=0)
+{
+    size_t res = 1;
+    for(auto i=0; i<v.dimensions().size(); ++i)
+        if(i!=execlude_dim)
+            res *= v.dimension(i);
+   return res;
+}
+template<typename T>
+typename T::Scalar* chip_data(const T& v,int offset)
+{
+    return v.data()+offset*dims_prod(v,0);
+}
 //#define _TT_
 
 #ifdef _TT_
@@ -40,3 +54,4 @@ inline void default_log_func(const std::string& v)
 #define TIME_THIS() 
 #define TIME_THISV1(x) 
 #endif
+

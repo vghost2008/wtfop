@@ -9,6 +9,8 @@
 #include <boost/algorithm/clamp.hpp>
 #include <random>
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+#include "unsupported/Eigen/CXX11/src/Tensor/TensorDeviceCuda.h"
+//#include "unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/tensor_shape.h"
@@ -16,12 +18,14 @@
 #include "tensorflow/core/util/work_sharder.h"
 #include "bboxes.h"
 #include "wtoolkit.h"
+#include "wtoolkit_cuda.h"
 #include <future>
 
 using namespace tensorflow;
 using namespace std;
 
 typedef Eigen::ThreadPoolDevice CPUDevice;
+typedef Eigen::GpuDevice GPUDevice;
 
 /*
  * prio_scaling:[4]
@@ -65,6 +69,9 @@ REGISTER_OP("BoxesEncode")
 
 template <typename Device, typename T>
 class BoxesEncodeOp: public OpKernel {
+};
+template <typename T>
+class BoxesEncodeOp<CPUDevice,T>: public OpKernel {
 	public:
 		explicit BoxesEncodeOp(OpKernelConstruction* context) : OpKernel(context) {
 			OP_REQUIRES_OK(context, context->GetAttr("pos_threshold", &pos_threshold));
@@ -118,8 +125,7 @@ class BoxesEncodeOp: public OpKernel {
 			auto output_remove_indict_tensor  =  output_remove_indict->template tensor<bool,2>();
 			auto output_indict_tensor         =  output_indict->template tensor<int,2>();
 
-            BoxesEncodeUnit<T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
-            //for(auto i=0; i<batch_size; ++i) {
+            BoxesEncodeUnit<CPUDevice,T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
             auto shard = [&](int64 start,int64 limit){
                 for(auto i=start; i<limit; ++i) {
 
@@ -147,9 +153,6 @@ class BoxesEncodeOp: public OpKernel {
                     out_indices         =  std::get<4>(res);
                 }
             };
-            /*const DeviceBase::CpuWorkerThreads& worker_threads = *(context->device()->tensorflow_cpu_worker_threads());
-            const int64 total_cost= 1e6;
-            Shard(worker_threads.num_threads, worker_threads.workers, batch_size, total_cost, shard);*/
             list<future<void>> results;
             for(auto i=0; i<batch_size; ++i) {
                 results.emplace_back(async(launch::async,[i,&shard](){ shard(i,i+1);}));
@@ -160,7 +163,95 @@ class BoxesEncodeOp: public OpKernel {
 		float         neg_threshold;
 		vector<float> prio_scaling;
 };
+template <typename T>
+class BoxesEncodeOp<GPUDevice,T>: public OpKernel {
+	public:
+		explicit BoxesEncodeOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("pos_threshold", &pos_threshold));
+			OP_REQUIRES_OK(context, context->GetAttr("neg_threshold", &neg_threshold));
+			OP_REQUIRES_OK(context, context->GetAttr("prio_scaling", &prio_scaling));
+			OP_REQUIRES(context, prio_scaling.size() == 4, errors::InvalidArgument("prio scaling data must be shape[4]"));
+		}
+
+		void Compute(OpKernelContext* context) override
+		{
+            TIME_THISV1("BoxesEncodeGPU");
+			const Tensor &_bottom_boxes   = context->input(0);
+			const Tensor &_bottom_gboxes  = context->input(1);
+			const Tensor &_bottom_glabels = context->input(2);
+			const Tensor &_bottom_gsize   = context->input(3);
+			auto          bottom_boxes    = _bottom_boxes.template tensor<T,3>();
+			auto          bottom_gboxes   = _bottom_gboxes.template tensor<T,3>();
+			auto          bottom_glabels  = _bottom_glabels.template tensor<int,2>();
+			auto          d_bottom_gsize  = _bottom_gsize.template tensor<int,1>();
+			const auto    batch_size      = _bottom_gboxes.dim_size(0);
+			const auto    data_nr         = _bottom_boxes.dim_size(1);
+		    Eigen::Tensor<int,1,Eigen::RowMajor> bottom_gsize;
+            assign_tensor<CPUDevice,GPUDevice>(bottom_gsize,d_bottom_gsize);
+
+			OP_REQUIRES(context, _bottom_boxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
+			OP_REQUIRES(context, _bottom_gboxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
+			OP_REQUIRES(context, _bottom_glabels.dims() == 2, errors::InvalidArgument("labels data must be 2-dimensional"));
+			OP_REQUIRES(context, _bottom_gsize.dims() == 1, errors::InvalidArgument("gsize data must be 1-dimensional"));
+
+			int           dims_3d[3]            = {int(batch_size),int(data_nr),4};
+			int           dims_2d[2]            = {int(batch_size),int(data_nr)};
+			TensorShape   outshape0;
+			TensorShape   outshape1;
+			Tensor       *output_boxes          = NULL;
+			Tensor       *output_labels         = NULL;
+			Tensor       *output_scores         = NULL;
+			Tensor       *output_remove_indict  = NULL;
+			Tensor       *output_indict         = NULL;
+
+			TensorShapeUtils::MakeShape(dims_3d, 3, &outshape0);
+			TensorShapeUtils::MakeShape(dims_2d, 2, &outshape1);
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_boxes));
+			OP_REQUIRES_OK(context, context->allocate_output(1, outshape1, &output_labels));
+			OP_REQUIRES_OK(context, context->allocate_output(2, outshape1, &output_scores));
+			OP_REQUIRES_OK(context, context->allocate_output(3, outshape1, &output_remove_indict));
+			OP_REQUIRES_OK(context, context->allocate_output(4, outshape1, &output_indict));
+
+			auto output_boxes_tensor          =  output_boxes->template tensor<T,3>();
+			auto output_labels_tensor         =  output_labels->template tensor<int,2>();
+			auto output_scores_tensor         =  output_scores->template tensor<T,2>();
+			auto output_remove_indict_tensor  =  output_remove_indict->template tensor<bool,2>();
+			auto output_indict_tensor         =  output_indict->template tensor<int,2>();
+
+            BoxesEncodeUnit<GPUDevice,T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
+            for(auto i=0; i<batch_size; ++i) {
+            //auto shard = [&](int64 start,int64 limit){
+             //   for(auto i=start; i<limit; ++i) {
+                    
+                    auto size    = bottom_gsize(i);
+                    auto boxes   = bottom_boxes.dimension(0)==batch_size?chip_data(bottom_boxes,i):chip_data(bottom_boxes,0);
+                    auto gboxes  = chip_data(bottom_gboxes,i);
+                    auto glabels = chip_data(bottom_glabels,i);
+                    encode_unit(boxes,gboxes,glabels,
+                            chip_data(output_boxes_tensor,i),
+                            chip_data(output_labels_tensor,i),
+                            chip_data(output_scores_tensor,i),
+                            chip_data(output_remove_indict_tensor,i),
+                            chip_data(output_indict_tensor,i),
+                            size,bottom_boxes.dimension(1)
+                            );
+                }
+/*            };
+            list<future<void>> results;
+            for(auto i=0; i<batch_size; ++i) {
+                results.emplace_back(async(launch::async,[i,&shard](){ shard(i,i+1);}));
+            }*/
+        }
+	private:
+		float         pos_threshold;
+		float         neg_threshold;
+		vector<float> prio_scaling;
+};
 REGISTER_KERNEL_BUILDER(Name("BoxesEncode").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesEncodeOp<CPUDevice, float>);
+#ifdef GOOGLE_CUDA
+REGISTER_KERNEL_BUILDER(Name("BoxesEncode").Device(DEVICE_GPU).TypeConstraint<float>("T"), BoxesEncodeOp<GPUDevice, float>);
+#endif
 /*
  * prio_scaling:[4]
  * bottom_boxes:[X,4](ymin,xmin,ymax,xmax) 候选box,相对坐标
@@ -194,7 +285,10 @@ REGISTER_OP("BoxesEncode1")
             });
 
 template <typename Device, typename T>
-class BoxesEncode1Op: public OpKernel {
+class BoxesEncode1Op{
+};
+template <typename T>
+class BoxesEncode1Op<CPUDevice,T>: public OpKernel {
 	public:
         struct IOUIndex{
             int index;
@@ -245,7 +339,7 @@ class BoxesEncode1Op: public OpKernel {
 			auto output_scores_tensor        = output_scores->template tensor<T,1>();
 			auto output_remove_indict_tensor = output_remove_indict->template tensor<bool,1>();
 
-			BoxesEncodeUnit<T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
+			BoxesEncodeUnit<CPUDevice,T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
 			auto &boxes              = bottom_boxes;
 			auto &gboxes             = bottom_gboxes;
 			auto &glabels            = bottom_glabels;
@@ -260,6 +354,78 @@ class BoxesEncode1Op: public OpKernel {
 			out_scores          =  std::get<2>(res);
 			out_remove_indices  =  std::get<3>(res);
 		}
+	private:
+		float         pos_threshold;
+		float         neg_threshold;
+		vector<float> prio_scaling;
+};
+template <typename T>
+class BoxesEncode1Op<GPUDevice,T>: public OpKernel {
+	public:
+        struct IOUIndex{
+            int index;
+            float iou;
+        };
+		explicit BoxesEncode1Op(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("pos_threshold", &pos_threshold));
+			OP_REQUIRES_OK(context, context->GetAttr("neg_threshold", &neg_threshold));
+			OP_REQUIRES_OK(context, context->GetAttr("prio_scaling", &prio_scaling));
+			OP_REQUIRES(context, prio_scaling.size() == 4, errors::InvalidArgument("prio scaling data must be shape[4]"));
+		}
+
+		void Compute(OpKernelContext* context) override
+        {
+            TIME_THISV1("BoxesEncode1");
+            const Tensor &_bottom_boxes   = context->input(0);
+            const Tensor &_bottom_gboxes  = context->input(1);
+            const Tensor &_bottom_glabels = context->input(2);
+            auto          bottom_boxes    = _bottom_boxes.template tensor<T,2>();
+            auto          bottom_gboxes   = _bottom_gboxes.template tensor<T,2>();
+            auto          bottom_glabels  = _bottom_glabels.template tensor<int,1>();
+            const auto    data_nr         = _bottom_boxes.dim_size(0);
+
+            OP_REQUIRES(context, _bottom_boxes.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
+            OP_REQUIRES(context, _bottom_gboxes.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
+            OP_REQUIRES(context, _bottom_glabels.dims() == 1, errors::InvalidArgument("labels data must be 1-dimensional"));
+
+            int           dims_2d[2]            = {int(data_nr),4};
+            int           dims_1d[1]            = {int(data_nr)};
+            TensorShape   outshape0;
+            TensorShape   outshape1;
+            Tensor       *output_boxes          = NULL;
+            Tensor       *output_labels         = NULL;
+            Tensor       *output_scores         = NULL;
+            Tensor       *output_remove_indict  = NULL;
+            vector<IOUIndex>   iou_indexs(data_nr,IOUIndex({-1,0.0})); //默认box不与任何ground truth box相交，iou为0
+
+            TensorShapeUtils::MakeShape(dims_2d, 2, &outshape0);
+            TensorShapeUtils::MakeShape(dims_1d, 1, &outshape1);
+
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_boxes));
+            OP_REQUIRES_OK(context, context->allocate_output(1, outshape1, &output_labels));
+            OP_REQUIRES_OK(context, context->allocate_output(2, outshape1, &output_scores));
+            OP_REQUIRES_OK(context, context->allocate_output(3, outshape1, &output_remove_indict));
+            auto output_boxes_tensor         = output_boxes->template tensor<T,2>();
+            auto output_labels_tensor        = output_labels->template tensor<int,1>();
+            auto output_scores_tensor        = output_scores->template tensor<T,1>();
+            auto output_remove_indict_tensor = output_remove_indict->template tensor<bool,1>();
+
+            BoxesEncodeUnit<GPUDevice,T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
+            auto size    = bottom_gboxes.dimension(0);
+            auto boxes   = bottom_boxes.data();
+            auto gboxes  = bottom_gboxes.data();
+            auto glabels = bottom_glabels.data();
+            encode_unit(boxes,gboxes,glabels,
+                    output_boxes_tensor.data(),
+                    output_labels_tensor.data(),
+                    output_scores_tensor.data(),
+                    output_remove_indict_tensor.data(),
+                    nullptr,
+                    size,bottom_boxes.dimension(0)
+                    );
+           //cout<<"USE GPU encode1"<<endl;
+        }
 	private:
 		float         pos_threshold;
 		float         neg_threshold;
@@ -297,7 +463,7 @@ class BoxesEncode1GradOp: public OpKernel {
 
 			auto output_grad_flat = output_grad->template flat<T>();
 			auto num_elements     = output_grad->NumElements();
-			cout<<"num elements:"<<num_elements<<","<<bottom_boxes.dims()<<","<<bottom_boxes.dim_size(0)<<","<<bottom_boxes.dim_size(1)<<endl;
+			//cout<<"num elements:"<<num_elements<<","<<bottom_boxes.dims()<<","<<bottom_boxes.dim_size(0)<<","<<bottom_boxes.dim_size(1)<<endl;
 
             for(auto i=0; i<num_elements; ++i)
                 output_grad_flat(i) = 0.0f;
@@ -308,6 +474,9 @@ class BoxesEncode1GradOp: public OpKernel {
 };
 REGISTER_KERNEL_BUILDER(Name("BoxesEncode1").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesEncode1Op<CPUDevice, float>);
 REGISTER_KERNEL_BUILDER(Name("BoxesEncode1Grad").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesEncode1GradOp<CPUDevice, float>);
+#ifdef GOOGLE_CUDA
+REGISTER_KERNEL_BUILDER(Name("BoxesEncode1").Device(DEVICE_GPU).TypeConstraint<float>("T"), BoxesEncode1Op<GPUDevice, float>);
+#endif
 /*
  * bottom_boxes:[Nr,4](ymin,xmin,ymax,xmax) proposal box,相对坐标
  * bottom_regs:[Nr,4],(y,x,h,w)
@@ -323,7 +492,10 @@ REGISTER_OP("DecodeBoxes1")
     .SetShapeFn(shape_inference::UnchangedShape);
 
 template <typename Device, typename T>
-class DecodeBoxes1Op: public OpKernel {
+class DecodeBoxes1Op{
+};
+template <typename T>
+class DecodeBoxes1Op<CPUDevice,T>: public OpKernel {
 	public:
 		explicit DecodeBoxes1Op(OpKernelConstruction* context) : OpKernel(context) {
 			OP_REQUIRES_OK(context,
@@ -379,4 +551,41 @@ class DecodeBoxes1Op: public OpKernel {
 	private:
 		std::vector<float> prio_scaling;
 };
+template <typename T>
+class DecodeBoxes1Op<GPUDevice,T>: public OpKernel {
+	public:
+		explicit DecodeBoxes1Op(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context,
+					context->GetAttr("prio_scaling", &prio_scaling));
+		}
+
+		void Compute(OpKernelContext* context) override
+		{
+            TIME_THISV1("DecodeBoxesGPU1");
+			const Tensor &bottom_boxes       = context->input(0);
+			const Tensor &bottom_regs        = context->input(1);
+			auto          bottom_regs_flat   = bottom_regs.flat<T>();
+			auto          bottom_boxes_flat  = bottom_boxes.flat<T>();
+
+			OP_REQUIRES(context, bottom_regs.dims() == 2, errors::InvalidArgument("regs data must be 2-dimensional"));
+			OP_REQUIRES(context, bottom_boxes.dims() == 2, errors::InvalidArgument("pos data must be 2-dimensional"));
+			OP_REQUIRES(context, bottom_boxes.dim_size(0)==bottom_regs.dim_size(0), errors::InvalidArgument("First dim size must be equal."));
+			OP_REQUIRES(context, bottom_boxes.dim_size(1)==4, errors::InvalidArgument("Boxes second dim size must be 4."));
+			OP_REQUIRES(context, bottom_regs.dim_size(1)==4, errors::InvalidArgument("Regs second dim size must be 4."));
+			const auto nr = bottom_regs.dim_size(0);
+
+			TensorShape output_shape = bottom_regs.shape();
+			// Create output tensors
+			Tensor* output_tensor = NULL;
+			OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
+
+			auto output = output_tensor->template flat<T>();
+            bboxes_decode_by_gpu(bottom_boxes_flat.data(),bottom_regs_flat.data(),prio_scaling.data(),output.data(),nr);
+		}
+	private:
+		std::vector<float> prio_scaling;
+};
 REGISTER_KERNEL_BUILDER(Name("DecodeBoxes1").Device(DEVICE_CPU).TypeConstraint<float>("T"), DecodeBoxes1Op<CPUDevice, float>);
+#ifdef GOOGLE_CUDA
+REGISTER_KERNEL_BUILDER(Name("DecodeBoxes1").Device(DEVICE_GPU).TypeConstraint<float>("T"), DecodeBoxes1Op<GPUDevice, float>);
+#endif
