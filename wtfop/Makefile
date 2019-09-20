@@ -6,7 +6,7 @@ TF_LIB = $(shell python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib(
 #TF_LIB = $(shell /home/wj/anaconda3_rl/bin/python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib())')
 #TF_LIB = $(shell /home/wj/anaconda3_cpu/bin/python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib())')
 #TF_LIB = "/home/vghost/.local/lib/python3.6/site-packages/tensorflow"
-USE_CUDA := "YES"
+#USE_CUDA := "YES"
 all: build
 #all: clean build
 #g++ -std=c++14 -shared -g -o $@ $^ -I $(TF_INC) -fPIC -D_GLIBCXX_USE_CXX11_ABI=0 -L${TF_LIB} -ltensorflow_framework 
@@ -20,11 +20,11 @@ build: wtfop.so
 
 #wtfop.so: wtfop.cc bboxes.cc wtoolkit.cc nlp.cc dentalfilm.cc medical.cc
 ifdef USE_CUDA
-targets = mask.o wtfop.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o bboxes_encode_decode_gpu.o
+targets = mask.o wtfop.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o bboxes_encode_decode_gpu.o center_net_encode_decode.o
 CXXFLAGS += -DGOOGLE_CUDA -DEIGEN_USE_GPU -DEIGEN_USE_THREADS
 CXXFLAGS += -I/usr/local/cuda-9.0/include 
 else
-targets = mask.o wtfop.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o
+targets = mask.o wtfop.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o center_net_encode_decode.o
 endif
 
 bboxes_encode_decode_gpu.o:bboxes_encode_decode_gpu.cu

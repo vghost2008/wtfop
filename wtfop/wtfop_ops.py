@@ -187,6 +187,13 @@ def boxes_encode(bboxes, gboxes,glabels,length,pos_threshold=0.7,neg_threshold=0
     pos_threshold=pos_threshold,neg_threshold=neg_threshold,prio_scaling=prio_scaling)
     return out[0],out[1],out[2],out[3],out[4]
 
+def center_boxes_encode(gbboxes, glabels,glength,output_size,num_classes=2,max_box_nr=32,gaussian_iou=0.7):
+    if glabels.dtype != tf.int32:
+        glabels= tf.cast(glabels,tf.int32)
+    out = wtfop_module.center_boxes_encode(gbboxes=gbboxes,glabels=glabels,glength=glength,
+    output_size=output_size,num_classes=num_classes,max_box_nr=max_box_nr,gaussian_iou=gaussian_iou)
+    return out[0],out[1],out[2],out[3],out[4]
+
 '''
  * prio_scaling:[4]
  * bottom_boxes:[X,4](ymin,xmin,ymax,xmax) 候选box,相对坐标

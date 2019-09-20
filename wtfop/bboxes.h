@@ -387,12 +387,6 @@ class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
 				}
 				return std::make_tuple(out_boxes,out_labels,out_scores,out_remove_indices,outindex);
 			}
-            void make_output(const Eigen::Tensor<T,2,Eigen::RowMajor>& boxes,
-		   const Eigen::Tensor<T,2,Eigen::RowMajor>& gboxes,
-		   const Eigen::Tensor<int,1,Eigen::RowMajor>& glabels,
-                auto                  out_boxes            = Eigen::Tensor<T,2,Eigen::RowMajor>(data_nr,4);
-                auto                  out_labels           = Eigen::Tensor<int,1,Eigen::RowMajor>(data_nr);
-                auto                  out_scores           = Eigen::Tensor<T,1,Eigen::RowMajor>(data_nr);
 	private:
 		const float              pos_threshold_;
 		const float              neg_threshold_;
@@ -428,5 +422,27 @@ class BoxesEncodeUnit<Eigen::GpuDevice,T> {
 };
 void bboxes_decode_by_gpu(const float* anchor_bboxes,const float* regs,const float* prio_scaling,float* out_bboxes,size_t data_nr);
 #else
-#error "No cuda support"
+//#error "No cuda support"
 #endif
+
+inline float get_gaussian_radius(float height,float width,float min_overlap)
+{
+    auto a1 = 1;
+    auto b1 = (height+width);
+    auto c1 = width*height*(1-min_overlap)/(1+min_overlap);
+    auto sq1 = sqrt(b1*b1-4*a1*c1);
+    auto r1 = (b1+sq1)/2;
+
+    auto a2 = 4;
+    auto b2 = 2*(height+width);
+    auto c2 = width*height*(1-min_overlap);
+    auto sq2 = sqrt(b2*b2-4*a2*c2);
+    auto r2 = (b2+sq2)/2;
+
+    auto a3 = 4*min_overlap;
+    auto b3 = -2*min_overlap*(height+width);
+    auto c3 = width*height*(1-min_overlap);
+    auto sq3 = sqrt(b3*b3-4*a3*c3);
+    auto r3 = (b3+sq3)/2;
+    return std::min<float>({r1,r2,r3});
+}

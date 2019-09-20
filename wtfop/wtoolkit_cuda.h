@@ -1,4 +1,5 @@
 #pragma once
+#ifdef GOOGLE_CUDA
 #include <iostream>
 #include <memory>
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
@@ -238,3 +239,4 @@ __device__ void d_show_cuda_data(const T* data,size_t size, int col_nr=20,const 
         printf("\n");
     }
 }
+#endif
