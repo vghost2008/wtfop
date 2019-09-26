@@ -523,6 +523,7 @@ REGISTER_OP("BoxesNmsNr2")
 	.Attr("threshold:float")
     .Input("bottom_box: T")
     .Input("classes:int32")
+    .Input("confidence:T")
 	.Output("output_box:T")
 	.Output("output_classes:int32")
 	.Output("output_index:int32")
@@ -537,6 +538,16 @@ REGISTER_OP("BoxesNmsNr2")
 
 template <typename Device, typename T>
 class BoxesNmsNr2Op: public OpKernel {
+    private:
+        struct InterData
+        {
+            InterData(int i,float s):index(i),score(s){}
+            int index;
+            float score;
+            bool operator<(const InterData& v)const {
+                return score<v.score;
+            }
+        };
 	public:
 		explicit BoxesNmsNr2Op(OpKernelConstruction* context) : OpKernel(context) {
 			OP_REQUIRES_OK(context, context->GetAttr("classes_wise", &classes_wise_));
@@ -549,8 +560,11 @@ class BoxesNmsNr2Op: public OpKernel {
 		{
 			const Tensor &bottom_box          = context->input(0);
 			const Tensor &bottom_classes      = context->input(1);
+			const Tensor &confidence          = context->input(2);
 			auto          bottom_box_flat     = bottom_box.flat<T>();
 			auto          bottom_classes_flat = bottom_classes.flat<int32>();
+			auto          confidence_flat     = confidence.flat<T>();
+
 
 			OP_REQUIRES(context, bottom_box.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
 			OP_REQUIRES(context, bottom_classes.dims() == 1, errors::InvalidArgument("classes data must be 1-dimensional"));
@@ -560,7 +574,6 @@ class BoxesNmsNr2Op: public OpKernel {
 			const auto   loop_end              = data_nr-1;
 
             auto loop_fn = [&](float threshold) {
-                auto keep_nr = keep_mask.size();
 				for(auto i=0; i<loop_end; ++i) {
 					if(!keep_mask.at(i)) continue;
 					const auto iclass = bottom_classes_flat(i);
@@ -569,26 +582,47 @@ class BoxesNmsNr2Op: public OpKernel {
 						if(!keep_mask.at(j)) continue;
 						if(bboxes_jaccard(bottom_box_flat.data()+i*4,bottom_box_flat.data()+j*4) < threshold) continue;
 						keep_mask[j] = false;
-						--keep_nr;
 					}
 				}
-               return keep_nr;
             };
 
-            if(k_>data_nr) k_ = data_nr;
+            if(k_>data_nr) {
+                cout<<"Error input size is less than require ("<<data_nr<<" vs "<<k_<<")."<<endl;
+            }
 
-            auto nr = loop_fn(threshold_);
+            loop_fn(threshold_);
 			auto out_size = count(keep_mask.begin(),keep_mask.end(),true);
 
             if(out_size<k_) {
                 auto delta = k_-out_size;
+                vector<InterData> datas;
+                datas.reserve((data_nr-out_size)/2);
+
                 for(auto it=keep_mask.begin(); it!=keep_mask.end(); ++it) 
                     if((*it) == false) {
-                        (*it) = true;
-                        --delta;
-                        if(0 == delta) break;
+                        auto index = std::distance(keep_mask.begin(),it);
+                        auto score = confidence_flat.data()[index];
+                        for(auto kt=keep_mask.begin(); kt != it; ++kt) {
+                            if((*kt) == false) 
+                                continue;
+                            auto index0 = std::distance(keep_mask.begin(),kt);
+                            auto iou = bboxes_jaccard(bottom_box_flat.data()+index*4,bottom_box_flat.data()+index0*4);
+                            score *= (1.0-iou);
+                        }
+                        datas.emplace_back(int(index),score);
                     }
-            } else if(out_size>k_) {
+                for(auto x=0; x<delta; ++x) {
+                    auto jt = max_element(datas.begin(),datas.end());
+                    const auto index = jt->index;
+                    keep_mask[jt->index] = true;
+                    datas.erase(jt);
+                    for(auto jt=datas.begin(); jt!=datas.end(); ++jt) {
+                        auto index0 = jt->index;
+                        auto iou = bboxes_jaccard(bottom_box_flat.data()+index*4,bottom_box_flat.data()+index0*4);
+                        jt->score *= (1.0-iou);
+                    }
+                }
+          } else if(out_size>k_) {
                 auto nr = out_size-k_;
                 for(auto it = keep_mask.rbegin(); it!=keep_mask.rend(); ++it) {
                     if((*it) == true) {
@@ -620,6 +654,10 @@ class BoxesNmsNr2Op: public OpKernel {
 			auto oindex   = output_index->template flat<int32>();
 			int  j        = 0;
 			int  i        = 0;
+
+            obox.setZero();
+            oindex.setZero();
+            oclasses.setZero();
 
 			for(i=0,j=0; i<data_nr; ++i) {
 				if(!keep_mask[i]) continue;
