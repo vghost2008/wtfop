@@ -94,7 +94,7 @@ T bboxes_jaccard_of_box0(const T* box0, const T* box1)
 	return int_vol/box0_vol;
 }
 template<typename T0,typename T1>
-auto bboxes_jaccard_of_box0v1(const T0& box0, const T1& box1)
+float bboxes_jaccard_of_box0v1(const T0& box0, const T1& box1)
 {
 	const auto int_ymin = std::max(box0(0),box1(0));
 	const auto int_xmin = std::max(box0(1),box1(1));

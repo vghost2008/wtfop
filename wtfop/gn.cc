@@ -280,7 +280,9 @@ class AdjacentMatrixGeneratorByIouOp: public OpKernel {
                     const Eigen::Tensor<T,1,Eigen::RowMajor> box_data0 = bboxes.chip(i,0);
                     for(auto j=i+1; j<data_nr; ++j) {
                         const Eigen::Tensor<T,1,Eigen::RowMajor> box_data1 = bboxes.chip(j,0);
-                        if(bboxes_jaccardv1(box_data0,box_data1)>threshold_) {
+                        //if(bboxes_jaccardv1(box_data0,box_data1)>threshold_) {
+                        if((bboxes_jaccard_of_box0v1(box_data0,box_data1)>threshold_) ||
+                                (bboxes_jaccard_of_box0v1(box_data1,box_data0)>threshold_)) {
                             res(i,j) = 1;
                             res(j,i) = 1;
                         }
