@@ -167,3 +167,254 @@ class CenterBoxesEncodeOp: public OpKernel {
         float gaussian_iou_ = 0.7f;
 };
 REGISTER_KERNEL_BUILDER(Name("CenterBoxesEncode").Device(DEVICE_CPU).TypeConstraint<float>("T"), CenterBoxesEncodeOp<CPUDevice, float>);
+
+REGISTER_OP("CenterBoxesDecode")
+    .Attr("T: {float,double,int32,int64}")
+    .Attr("k:int")
+    .Input("heatmaps_tl: T")
+    .Input("heatmaps_br: T")
+    .Input("heatmaps_c: T")
+    .Input("offset_tl: T")
+    .Input("offset_br: T")
+    .Input("offset_c: T")
+	.Output("output_bboxes:T")
+	.Output("output_labels:int32")
+	.Output("output_lens:int32")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+            const auto input_shape0 = c->input(0);
+            const auto batch_size = c->Dim(input_shape0,0);
+            auto shape0 = c->MakeShape({batch_size,-1,4});
+            auto shape1 = c->MakeShape({batch_size,-1});
+            auto shape2 = c->MakeShape({batch_size});
+
+			c->set_output(0, shape0);
+			c->set_output(1, shape1);
+			c->set_output(2, shape2);
+			return Status::OK();
+			});
+
+template <typename Device,typename T>
+class CenterBoxesDecodeOp: public OpKernel {
+    private:
+        struct InterData{
+            InterData(int i,float s):index(i),score(s){}
+            int index;
+            float score;
+            float y;
+            float x;
+            bool operator<(const InterData& rhv)const{
+                return score<rhv.score;
+            }
+        };
+        struct Box
+        {
+            float ymin;
+            float xmin;
+            float ymax;
+            float xmax;
+        };
+    public:
+        explicit CenterBoxesDecodeOp(OpKernelConstruction* context) : OpKernel(context) {
+            OP_REQUIRES_OK(context, context->GetAttr("k", &k_));
+        }
+        void Compute(OpKernelContext* context) override
+        {
+            TIME_THISV1("CenterBoxesDecode");
+            const Tensor &_heatmaps_tl = context->input(0);
+            const Tensor &_heatmaps_br = context->input(1);
+            const Tensor &_heatmaps_c  = context->input(2);
+            const Tensor &_offset_tl   = context->input(3);
+            const Tensor &_offset_br   = context->input(4);
+            const Tensor &_offset_c    = context->input(5);
+            auto         &heatmaps_tl  = _heatmaps_tl.template tensor<T>();
+            auto         &heatmaps_br  = _heatmaps_br.template tensor<T>();
+            auto         &heatmaps_c   = _heatmaps_c.template tensor<T>();
+            auto         &offset_tl    = _offset_tl.template tensor<T>();
+            auto         &offset_br    = _offset_br.template tensor<T>();
+            auto         &offset_c     = _offset_c.template tensor<T>();
+
+            const auto    batch_size  = _heatmaps_tl.dim_size(0);
+            const auto num_classes = _heatmaps_tl.dim_size(3);
+            const auto dw = 1.0/(heatmaps_tl.dimension(2)-1);
+            const auto dh = 1.0/(heatmaps_tl.dimension(1)-1);
+            const auto H = heatmaps_tl.dimensional(1);
+            const auto W = heatmaps_tl.dimensional(2);
+
+            OP_REQUIRES(context, _heatmaps_tl.dims() == 4, errors::InvalidArgument("heatmap data must be 4-dimensional"));
+            OP_REQUIRES(context, _heatmaps_br.dims() == 4, errors::InvalidArgument("heatmap data must be 4-dimensional"));
+            OP_REQUIRES(context, _heatmaps_c.dims() == 4, errors::InvalidArgument("heatmap data must be 4-dimensional"));
+            OP_REQUIRES(context, _offset_tl.dims() == 4, errors::InvalidArgument("offset data must be 4-dimensional"));
+            OP_REQUIRES(context, _offset_br.dims() == 4, errors::InvalidArgument("offset data must be 4-dimensional"));
+            OP_REQUIRES(context, _offset_c.dims() == 4, errors::InvalidArgument("offset data must be 4-dimensional"));
+
+            list<vector<Box>> res_boxes;
+            list<vector<int>> res_labels;
+            for(auto i=0; i<batch_size; ++i) {
+                vector<Box> boxes;
+                vector<int> labels;
+                for(auto j=0; j<num_classes; ++j) {
+                    vector<InterData> tl;
+                    vector<InterData> br;
+                    vector<InterData> c;
+                    tl.reserve(k_);
+                    br.reserve(k_);
+                    c.reserve(k_);
+                    tl = get_top_k(heatmaps_tl,i,j,k_);
+                    br = get_top_k(heatmaps_br,i,j,k_);
+                    c  = get_top_k(heatmaps_c,i,j,k_);
+                    fill_pos(offset_tl,tl,i,j);
+                    fill_pos(offset_br,br,i,j);
+                    fill_pos(offset_c,c,i,j);
+                    auto tboxes = get_boxes(tl,br,c);
+                    vector<int> tlabels(tboxes.size(),j);
+                    boxes.insert(boxes.end(),tboxes.begin(),tboxes.end());
+                    labels.insert(labels.end(),tlabels.begin(),tlabels.end());
+                }
+                res_boxes.push_back(boxes);
+                res_labels.push_back(labels);
+            }
+            auto box_nr = max_element(res_boxes.begin(),res_boxes.end(),[](const auto& lhv,const auto& rhv){ return lhv.size()<rhv.size();})->size();
+            int           dims_3d[3]            = {int(batch_size),box_nr,4};
+            int           dims_2d[2]           = {int(batch_size),box_nr};
+            int           dims_1d[1]           = {int(batch_size)};
+            TensorShape  outshape0;
+            TensorShape  outshape1;
+            TensorShape  outshape2;
+            Tensor      *output_boxes = NULL;
+            Tensor      *output_labels = NULL;
+            Tensor      *output_lens = NULL;
+
+            TensorShapeUtils::MakeShape(dims_3d, 3, &outshape0);
+            TensorShapeUtils::MakeShape(dims_2d, 2, &outshape1);
+            TensorShapeUtils::MakeShape(dims_1d, 1, &outshape2);
+
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_boxes));
+            OP_REQUIRES_OK(context, context->allocate_output(1, outshape1, &output_labels));
+            OP_REQUIRES_OK(context, context->allocate_output(2, outshape2, &output_lens));
+
+            auto o_boxes = output_boxes->template tensor<T,3>();
+            auto o_labels = output_labels->template tensor<int,2>();
+            auto o_lens = output_lens->template tensor<int,1>();
+
+            o_boxes.setZero();
+            o_labels.setZero();
+            o_lens.setZero();
+
+            for(auto i=0; i<batch_size; ++i) {
+                auto b_it = next(res_boxes.begin(),i);
+                auto l_it = next(res_labels.begin(),i);
+                for(auto j=0; j<b_it->size(); ++j) {
+                    auto& box = (*b_it)[j];
+                    o_boxes(i,j,0) = box.ymin;
+                    o_boxes(i,j,1) = box.xmin;
+                    o_boxes(i,j,2) = box.ymax;
+                    o_boxes(i,j,3) = box.xmax;
+                    o_labels(i,j) = (*l_it)[j];
+                }
+                o_lens(i) = b_it->size();
+            }
+        }
+        template<typename DT>
+            vector<InterData> get_top_k(const DT& heatmaps,int batch_index,int class_index,int k) {
+                const auto H = heatmaps.dimensional(1);
+                const auto W = heatmaps.dimensional(2);
+                vector<InterData> res;
+                res.reverse(H*W);
+                for(auto y=0; y<H; ++y) {
+                    for(auto x=0; x<W; ++x) {
+                        res.emplace_back(y*W+x,heatmaps(batch_index,y,x,class_index));
+                    }
+                }
+                auto mid = res.begin()+std::min<int>(k,res.size());
+                partial_sort(res.begin(),mid,res.end(),[](const auto& lhv,const auto& rhv){ return lhv.score>rhv.score;});
+                res.erase(mid,res.end());
+                return res;
+            }
+        template<typename DT>
+            void fill_pos(const DT& offsets,vector<InterData>& data,int batch_index,int class_index) {
+                const auto H = offsets.dimensional(1);
+                const auto W = offsets.dimensional(2);
+                const auto dw = 1.0/(H-1);
+                const auto dh = 1.0/(W-1);
+                int y;
+                int x;
+
+                for(auto&d :data) {
+                    std::tie(y,x) = index_to_yx(d.index,H,W);
+                    auto yoffset = offsets(batch_index,y,x,0)*dh;
+                    auto xoffset = offsets(batch_index,y,x,1)*dw;
+                    d.y = float(y)/(H-1)+yoffset;
+                    d.x = float(x)/(W-1)+xoffset;
+                }
+            }
+       template<typename DT>
+        vector<Box> get_boxes(const InterData& tl,const InterData& br,const InterData& c) {
+            const auto nr = tl.size();
+            Eigen::Tensor<float,2,Eigen::RowMajor> scores(nr,nr);
+
+            scores.setZero();
+
+            for(auto i=0; i<nr; ++i) {
+                const auto& tl_d = tl[i];
+                for(auto j=i+1; j<nr; ++j) {
+                    const auto& br_d = br[i];
+                    float box[4] = {tl_d.y,tl_d.x,br_d.y,br_d.x};
+                    if((box[0]>=box[2]) || (box[1]>=box[3])) continue;
+                    for(auto k=0; k<nr; ++k) {
+                        const auto& c_d = c[k];
+                        if(is_in_box_center(box,c_d.y,c_d.x,3)) {
+                            auto score = 1.0 - (box[2]-box[0])*(box[3]-box[1]);
+                            if(score>scores(i,j)) {
+                                scores(i,j) = score;
+                            }
+                        }
+                    }
+                }
+            }
+            vector<Box> boxs;
+            for(auto x=0; x<nr; ++x) {
+                auto max_i = 0;
+                auto max_j = 0;
+                auto max_score = -1.0;
+                for(auto i=0; i<nr; ++i) {
+                    for(auto j=i+1; j<nr; ++j) {
+                        if(scores(i,j)>max_score) {
+                            max_score = scores(i,j);
+                            max_i = i;
+                            max_j = j;
+                        }
+                    }
+                }
+                if(max_score<0) break;
+                Box box;
+                box.ymin = tl[max_i].y;
+                box.xmin = tl[max_i].x;
+                box.ymax = br[max_j].y;
+                box.xmax = br[max_j].x;
+                boxs.push_back(box);
+                for(auto j=max_i+1; j<nr; ++j)
+                    scores(max_i,j) = -1.0;
+                for(auto i=0; i<max_j; ++i)
+                    scores(i,max_j) = -1.0;
+            }
+            return boxs;
+        }
+       static inline bool is_in_box_center(const float* box,float y,float x,int grid_size=3) {
+           const auto h = box[2]-box[0];
+           const auto w = box[3]-box[1];
+           const auto h_grid_size = float(int(grid_size/2))/grid_size;
+           if((y<box[0]+h*h_grid_size)||
+                   (y>box[2]-h*h_grid_size)||
+                   (x<box[1]+w*h_grid_size) ||
+                   (x>box[3]-w*h_grid_size))
+               return false;
+           return true;
+       }
+        static inline pair<int,int> index_to_yx(int index,int H,int W) {
+            return make_pair(index/W,index%W);
+        }
+	private:
+        int k_ = 0;
+};
+REGISTER_KERNEL_BUILDER(Name("CenterBoxesEncode").Device(DEVICE_CPU).TypeConstraint<float>("T"), CenterBoxesEncodeOp<CPUDevice, float>);
