@@ -48,8 +48,8 @@ REGISTER_OP("CenterBoxesEncode")
             c->GetAttr("num_classes",&num_classes);
             c->GetAttr("max_box_nr",&max_box_nr);
             auto shape0 = c->MakeShape({batch_size,-1,-1,num_classes});
-            auto shape1 = c->MakeShape({batch_size,max_box_nr,4});
-            auto shape2 = c->MakeShape({batch_size,max_box_nr,2});
+            auto shape1 = c->MakeShape({batch_size,max_box_nr,6});
+            auto shape2 = c->MakeShape({batch_size,max_box_nr,3});
 
             for(auto i=0; i<3; ++i)
 			    c->set_output(i, shape0);
@@ -84,8 +84,8 @@ class CenterBoxesEncodeOp: public OpKernel {
             OP_REQUIRES(context, _gsize.dims() == 1, errors::InvalidArgument("gsize data must be 1-dimensional"));
 
             int           dims_4d[4]            = {int(batch_size),output_size[0],output_size[1],num_classes_};
-            int           dims_3d0[3]           = {int(batch_size),max_box_nr_,4};
-            int           dims_3d1[3]           = {int(batch_size),max_box_nr_,2};
+            int           dims_3d0[3]           = {int(batch_size),max_box_nr_,6};
+            int           dims_3d1[3]           = {int(batch_size),max_box_nr_,3};
             TensorShape  outshape0;
             TensorShape  outshape1;
             TensorShape  outshape2;
@@ -122,22 +122,29 @@ class CenterBoxesEncodeOp: public OpKernel {
                     const auto fxtl = gbboxes(i,j,1)*(output_size[1]-1);
                     const auto fybr = gbboxes(i,j,2)*(output_size[0]-1);
                     const auto fxbr = gbboxes(i,j,3)*(output_size[1]-1);
+                    const auto fyc = (fytl+fybr)/2;
+                    const auto fxc = (fxtl+fxbr)/2;
                     const auto ytl = int(fytl+0.5);
                     const auto xtl = int(fxtl+0.5);
                     const auto ybr = int(fybr+0.5);
                     const auto xbr = int(fxbr+0.5);
+                    const auto yc = int(fyc+0.5);
+                    const auto xc = int(fxc+0.5);
                     const auto r0 = get_gaussian_radius(fybr-fytl,fxbr-fxtl,gaussian_iou_);
                     const auto r1 = min<float>(r0,min(fybr-fytl,fxbr-fxtl)/2.0);
                     const auto label = glabels(i,j);
                     draw_gaussian(heatmaps_tl,xtl,ytl,r0,i,label);
                     draw_gaussian(heatmaps_br,xbr,ybr,r0,i,label);
-                    draw_gaussian(heatmaps_c,(fxtl+fxbr)/2,(fytl+fybr)/2,r1,i,label);
+                    draw_gaussian(heatmaps_c,fxc,fyc,r1,i,label);
                     offsets(i,j,0) = fytl-ytl;
                     offsets(i,j,1) = fxtl-xtl;
                     offsets(i,j,2) = fybr-ybr;
                     offsets(i,j,3) = fxbr-xbr;
+                    offsets(i,j,4) = fyc-yc;
+                    offsets(i,j,5) = fxc-xc;
                     tags(i,j,0) = ytl*output_size[1]+xtl;
                     tags(i,j,1) = ybr*output_size[1]+xbr;
+                    tags(i,j,2) = yc*output_size[1]+xc;
                 }
             }
         }
