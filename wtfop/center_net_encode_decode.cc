@@ -112,12 +112,16 @@ class CenterBoxesEncodeOp: public OpKernel {
             auto offsets     = output_offset->template tensor<T,3>();
             auto tags        = output_tags->template tensor<int,3>();
             tags.setZero();
+            offsets.setZero();
+            heatmaps_tl.setZero();
+            heatmaps_br.setZero();
+            heatmaps_c.setZero();
             for(auto i=0; i<batch_size; ++i) {
                 for(auto j=0; j<gsize(i); ++j) {
-                    const auto fytl = gbboxes(i,j,0)*output_size[0];
-                    const auto fxtl = gbboxes(i,j,1)*output_size[1];
-                    const auto fybr = gbboxes(i,j,2)*output_size[0];
-                    const auto fxbr = gbboxes(i,j,3)*output_size[1];
+                    const auto fytl = gbboxes(i,j,0)*(output_size[0]-1);
+                    const auto fxtl = gbboxes(i,j,1)*(output_size[1]-1);
+                    const auto fybr = gbboxes(i,j,2)*(output_size[0]-1);
+                    const auto fxbr = gbboxes(i,j,3)*(output_size[1]-1);
                     const auto ytl = int(fytl+0.5);
                     const auto xtl = int(fxtl+0.5);
                     const auto ybr = int(fybr+0.5);
@@ -149,11 +153,11 @@ class CenterBoxesEncodeOp: public OpKernel {
             const auto sigma  = radius/3;
 
             for(auto x=xtl; x<xbr; ++x) {
-                for(auto y=ytl; y<ytl; ++y) {
+                for(auto y=ytl; y<ybr; ++y) {
                     auto dx = x-cx;
-                    auto dy = x-cy;
+                    auto dy = y-cy;
                     auto v = exp(-(dx*dx+dy*dy)/(2*sigma*sigma))*k;
-                    data(batch_index,x,y,class_index) = max(data(batch_index,x,y,class_index),v);
+                    data(batch_index,y,x,class_index) = max(data(batch_index,y,x,class_index),v);
                 }
             }
         }
