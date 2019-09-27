@@ -79,9 +79,9 @@ class CenterBoxesEncodeOp: public OpKernel {
             auto          output_size = context->input(3).template flat<int>().data();
             const auto    batch_size  = _gbboxes.dim_size(0);
 
-            OP_REQUIRES(context, _gbboxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
-            OP_REQUIRES(context, _glabels.dims() == 2, errors::InvalidArgument("labels data must be 2-dimensional"));
-            OP_REQUIRES(context, _gsize.dims() == 1, errors::InvalidArgument("gsize data must be 1-dimensional"));
+            OP_REQUIRES(context, _gbboxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimension"));
+            OP_REQUIRES(context, _glabels.dims() == 2, errors::InvalidArgument("labels data must be 2-dimension"));
+            OP_REQUIRES(context, _gsize.dims() == 1, errors::InvalidArgument("gsize data must be 1-dimension"));
 
             int           dims_4d[4]            = {int(batch_size),output_size[0],output_size[1],num_classes_};
             int           dims_3d0[3]           = {int(batch_size),max_box_nr_,6};
@@ -186,6 +186,8 @@ REGISTER_OP("CenterBoxesDecode")
     .Input("offset_c: T")
 	.Output("output_bboxes:T")
 	.Output("output_labels:int32")
+	.Output("output_probs:T")
+	.Output("output_index:int32")
 	.Output("output_lens:int32")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
             const auto input_shape0 = c->input(0);
@@ -196,7 +198,9 @@ REGISTER_OP("CenterBoxesDecode")
 
 			c->set_output(0, shape0);
 			c->set_output(1, shape1);
-			c->set_output(2, shape2);
+			c->set_output(2, shape1);
+			c->set_output(3, shape1);
+			c->set_output(4, shape2);
 			return Status::OK();
 			});
 
@@ -219,10 +223,13 @@ class CenterBoxesDecodeOp: public OpKernel {
             float xmin;
             float ymax;
             float xmax;
+            float prob;
+            int index;
         };
     public:
         explicit CenterBoxesDecodeOp(OpKernelConstruction* context) : OpKernel(context) {
             OP_REQUIRES_OK(context, context->GetAttr("k", &k_));
+            cout<<"K="<<k_<<endl;
         }
         void Compute(OpKernelContext* context) override
         {
@@ -233,26 +240,26 @@ class CenterBoxesDecodeOp: public OpKernel {
             const Tensor &_offset_tl   = context->input(3);
             const Tensor &_offset_br   = context->input(4);
             const Tensor &_offset_c    = context->input(5);
-            auto         &heatmaps_tl  = _heatmaps_tl.template tensor<T>();
-            auto         &heatmaps_br  = _heatmaps_br.template tensor<T>();
-            auto         &heatmaps_c   = _heatmaps_c.template tensor<T>();
-            auto         &offset_tl    = _offset_tl.template tensor<T>();
-            auto         &offset_br    = _offset_br.template tensor<T>();
-            auto         &offset_c     = _offset_c.template tensor<T>();
+            auto          heatmaps_tl  = _heatmaps_tl.template tensor<T,4>();
+            auto          heatmaps_br  = _heatmaps_br.template tensor<T,4>();
+            auto          heatmaps_c   = _heatmaps_c.template tensor<T,4>();
+            auto          offset_tl    = _offset_tl.template tensor<T,4>();
+            auto          offset_br    = _offset_br.template tensor<T,4>();
+            auto          offset_c     = _offset_c.template tensor<T,4>();
 
             const auto    batch_size  = _heatmaps_tl.dim_size(0);
             const auto num_classes = _heatmaps_tl.dim_size(3);
             const auto dw = 1.0/(heatmaps_tl.dimension(2)-1);
             const auto dh = 1.0/(heatmaps_tl.dimension(1)-1);
-            const auto H = heatmaps_tl.dimensional(1);
-            const auto W = heatmaps_tl.dimensional(2);
+            const auto H = heatmaps_tl.dimension(1);
+            const auto W = heatmaps_tl.dimension(2);
 
-            OP_REQUIRES(context, _heatmaps_tl.dims() == 4, errors::InvalidArgument("heatmap data must be 4-dimensional"));
-            OP_REQUIRES(context, _heatmaps_br.dims() == 4, errors::InvalidArgument("heatmap data must be 4-dimensional"));
-            OP_REQUIRES(context, _heatmaps_c.dims() == 4, errors::InvalidArgument("heatmap data must be 4-dimensional"));
-            OP_REQUIRES(context, _offset_tl.dims() == 4, errors::InvalidArgument("offset data must be 4-dimensional"));
-            OP_REQUIRES(context, _offset_br.dims() == 4, errors::InvalidArgument("offset data must be 4-dimensional"));
-            OP_REQUIRES(context, _offset_c.dims() == 4, errors::InvalidArgument("offset data must be 4-dimensional"));
+            OP_REQUIRES(context, _heatmaps_tl.dims() == 4, errors::InvalidArgument("heatmap data must be 4-dimension"));
+            OP_REQUIRES(context, _heatmaps_br.dims() == 4, errors::InvalidArgument("heatmap data must be 4-dimension"));
+            OP_REQUIRES(context, _heatmaps_c.dims() == 4, errors::InvalidArgument("heatmap data must be 4-dimension"));
+            OP_REQUIRES(context, _offset_tl.dims() == 4, errors::InvalidArgument("offset data must be 4-dimension"));
+            OP_REQUIRES(context, _offset_br.dims() == 4, errors::InvalidArgument("offset data must be 4-dimension"));
+            OP_REQUIRES(context, _offset_c.dims() == 4, errors::InvalidArgument("offset data must be 4-dimension"));
 
             list<vector<Box>> res_boxes;
             list<vector<int>> res_labels;
@@ -274,6 +281,7 @@ class CenterBoxesDecodeOp: public OpKernel {
                     fill_pos(offset_c,c,i,j);
                     auto tboxes = get_boxes(tl,br,c);
                     vector<int> tlabels(tboxes.size(),j);
+                    cout<<"tboxes len:"<<tboxes.size()<<endl;
                     boxes.insert(boxes.end(),tboxes.begin(),tboxes.end());
                     labels.insert(labels.end(),tlabels.begin(),tlabels.end());
                 }
@@ -289,6 +297,8 @@ class CenterBoxesDecodeOp: public OpKernel {
             TensorShape  outshape2;
             Tensor      *output_boxes = NULL;
             Tensor      *output_labels = NULL;
+            Tensor      *output_probs = NULL;
+            Tensor      *output_indexs = NULL;
             Tensor      *output_lens = NULL;
 
             TensorShapeUtils::MakeShape(dims_3d, 3, &outshape0);
@@ -298,10 +308,14 @@ class CenterBoxesDecodeOp: public OpKernel {
 
             OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_boxes));
             OP_REQUIRES_OK(context, context->allocate_output(1, outshape1, &output_labels));
-            OP_REQUIRES_OK(context, context->allocate_output(2, outshape2, &output_lens));
+            OP_REQUIRES_OK(context, context->allocate_output(2, outshape1, &output_probs));
+            OP_REQUIRES_OK(context, context->allocate_output(3, outshape1, &output_indexs));
+            OP_REQUIRES_OK(context, context->allocate_output(4, outshape2, &output_lens));
 
             auto o_boxes = output_boxes->template tensor<T,3>();
             auto o_labels = output_labels->template tensor<int,2>();
+            auto o_probs = output_probs->template tensor<T,2>();
+            auto o_indexs = output_indexs->template tensor<int,2>();
             auto o_lens = output_lens->template tensor<int,1>();
 
             o_boxes.setZero();
@@ -318,21 +332,27 @@ class CenterBoxesDecodeOp: public OpKernel {
                     o_boxes(i,j,2) = box.ymax;
                     o_boxes(i,j,3) = box.xmax;
                     o_labels(i,j) = (*l_it)[j];
+                    o_probs(i,j) = box.prob;
+                    o_indexs(i,j) = box.index;
                 }
                 o_lens(i) = b_it->size();
+                cout<<"Size:"<< b_it->size()<<endl;
             }
         }
         template<typename DT>
             vector<InterData> get_top_k(const DT& heatmaps,int batch_index,int class_index,int k) {
-                const auto H = heatmaps.dimensional(1);
-                const auto W = heatmaps.dimensional(2);
+                TIME_THISV1(__func__);
+                const auto H = heatmaps.dimension(1);
+                const auto W = heatmaps.dimension(2);
                 vector<InterData> res;
-                res.reverse(H*W);
+                res.reserve(H*W);
                 for(auto y=0; y<H; ++y) {
                     for(auto x=0; x<W; ++x) {
                         res.emplace_back(y*W+x,heatmaps(batch_index,y,x,class_index));
                     }
                 }
+                auto it = partition(res.begin(),res.end(),[this](auto v){ return v.score>threshold_;});
+                res.erase(it,res.end());
                 auto mid = res.begin()+std::min<int>(k,res.size());
                 partial_sort(res.begin(),mid,res.end(),[](const auto& lhv,const auto& rhv){ return lhv.score>rhv.score;});
                 res.erase(mid,res.end());
@@ -340,8 +360,9 @@ class CenterBoxesDecodeOp: public OpKernel {
             }
         template<typename DT>
             void fill_pos(const DT& offsets,vector<InterData>& data,int batch_index,int class_index) {
-                const auto H = offsets.dimensional(1);
-                const auto W = offsets.dimensional(2);
+                TIME_THISV1(__func__);
+                const auto H = offsets.dimension(1);
+                const auto W = offsets.dimension(2);
                 const auto dw = 1.0/(H-1);
                 const auto dh = 1.0/(W-1);
                 int y;
@@ -355,37 +376,46 @@ class CenterBoxesDecodeOp: public OpKernel {
                     d.x = float(x)/(W-1)+xoffset;
                 }
             }
-       template<typename DT>
-        vector<Box> get_boxes(const InterData& tl,const InterData& br,const InterData& c) {
-            const auto nr = tl.size();
-            Eigen::Tensor<float,2,Eigen::RowMajor> scores(nr,nr);
+        vector<Box> get_boxes(const vector<InterData>& tl,const vector<InterData>& br,const vector<InterData>& c) {
+            TIME_THISV1(__func__);
+            const auto nr_i = tl.size();
+            const auto nr_j = br.size();
+            const auto nr_k = c.size();
+            Eigen::Tensor<float,2,Eigen::RowMajor> scores(nr_i,nr_j);
+            Eigen::Tensor<int,2,Eigen::RowMajor> c_index(nr_i,nr_j);
 
-            scores.setZero();
+            scores.setConstant(-1.0);
+            c_index.setZero();
 
-            for(auto i=0; i<nr; ++i) {
+            for(auto i=0; i<nr_i; ++i) {
                 const auto& tl_d = tl[i];
-                for(auto j=i+1; j<nr; ++j) {
-                    const auto& br_d = br[i];
+                for(auto j=0; j<nr_j; ++j) {
+                    const auto& br_d = br[j];
                     float box[4] = {tl_d.y,tl_d.x,br_d.y,br_d.x};
-                    if((box[0]>=box[2]) || (box[1]>=box[3])) continue;
-                    for(auto k=0; k<nr; ++k) {
+
+                    if((box[0]>=box[2]) || (box[1]>=box[3])) 
+                        continue;
+
+                    for(auto k=0; k<nr_k; ++k) {
                         const auto& c_d = c[k];
-                        if(is_in_box_center(box,c_d.y,c_d.x,3)) {
+                        if(is_in_box_center(box,c_d.y,c_d.x,1)) {
                             auto score = 1.0 - (box[2]-box[0])*(box[3]-box[1]);
                             if(score>scores(i,j)) {
                                 scores(i,j) = score;
+                                c_index(i,j) = k;
                             }
                         }
                     }
                 }
             }
             vector<Box> boxs;
-            for(auto x=0; x<nr; ++x) {
+            const auto loop_nr = min({nr_i,nr_j,nr_k});
+            for(auto x=0; x<loop_nr; ++x) {
                 auto max_i = 0;
                 auto max_j = 0;
                 auto max_score = -1.0;
-                for(auto i=0; i<nr; ++i) {
-                    for(auto j=i+1; j<nr; ++j) {
+                for(auto i=0; i<nr_i; ++i) {
+                    for(auto j=0; j<nr_j; ++j) {
                         if(scores(i,j)>max_score) {
                             max_score = scores(i,j);
                             max_i = i;
@@ -399,10 +429,13 @@ class CenterBoxesDecodeOp: public OpKernel {
                 box.xmin = tl[max_i].x;
                 box.ymax = br[max_j].y;
                 box.xmax = br[max_j].x;
+                const auto k = c_index(max_i,max_j);
+                box.index = c[k].index;
+                box.prob = (tl[max_i].score+br[max_j].score+c[k].score)/3.0f;
                 boxs.push_back(box);
-                for(auto j=max_i+1; j<nr; ++j)
+                for(auto j=0; j<nr_j; ++j)
                     scores(max_i,j) = -1.0;
-                for(auto i=0; i<max_j; ++i)
+                for(auto i=0; i<nr_i; ++i)
                     scores(i,max_j) = -1.0;
             }
             return boxs;
@@ -423,5 +456,6 @@ class CenterBoxesDecodeOp: public OpKernel {
         }
 	private:
         int k_ = 0;
+        float threshold_ = 1e-3;
 };
-REGISTER_KERNEL_BUILDER(Name("CenterBoxesEncode").Device(DEVICE_CPU).TypeConstraint<float>("T"), CenterBoxesEncodeOp<CPUDevice, float>);
+REGISTER_KERNEL_BUILDER(Name("CenterBoxesDecode").Device(DEVICE_CPU).TypeConstraint<float>("T"), CenterBoxesDecodeOp<CPUDevice, float>);

@@ -109,7 +109,7 @@ class WTFOPTest(tf.test.TestCase):
             am = sess.run(am)
             print(np.sum(am))
             wmlu.show_nparray(am,"AM")
-    def test_adjacent_matrix_generator_by_iou(self):
+    '''def test_adjacent_matrix_generator_by_iou(self):
         with self.test_session() as sess:
             np_gboxes = np.array([
                 [0.0, 0.0, 0.2, 0.2], [0.0, 0.1, 0.2, 0.3], [0.1, 0.1, 0.4, 0.4], [0.1, 0.0, 0.2, 0.3],
@@ -121,6 +121,7 @@ class WTFOPTest(tf.test.TestCase):
             bm = wop.adjacent_matrix_generator_by_iou(bboxes=np_gboxes,threshold=0.3,keep_connect=False)
             wmlu.show_nparray(bm.eval())
             self.assertAllEqual(bm.eval(),[[0,1,0,1,0,0,0,0],[1,0,0,1,0,0,0,0],[0,0,0,0,0,0,0,0],[1,1,0,0,0,0,0,0],[0,0,0,0,0,1,0,0],[0,0,0,0,1,0,0,0],[0,0,0,0,0,0,0,1],[0,0,0,0,0,0,1,0]])
+            '''
 
     def testEncodeBoxes1(self):
         with self.test_session() as sess:
@@ -330,6 +331,43 @@ class WTFOPTest(tf.test.TestCase):
             ids = wop.merge_line_boxes(data=datas,labels=labels,bboxes=bboxes,lens=lens,threshold=threshold,dis_threshold=dis_threshold)
             r_ids = sess.run(ids)
             print(r_ids)
+
+    def test_center_boxes_decode(self):
+        with self.test_session() as sess:
+            print("test test center boxes decode")
+            tl = np.zeros([1,9,9,3],dtype=np.float32)
+            br = np.zeros([1,9,9,3],dtype=np.float32)
+            c = np.zeros([1,9,9,3],dtype=np.float32)
+            offset_tl = np.zeros([1,9,9,2],dtype=np.float32)
+            offset_br = np.zeros([1,9,9,2],dtype=np.float32)
+            offset_c = np.zeros([1,9,9,2],dtype=np.float32)
+            tl[0,0,0,0] = 1
+            br[0,2,2,0] = 1
+            c[0,1,1,0] = 1
+
+            tl[0,5,5,2] = 0.7
+            br[0,7,7,2] = 0.8
+            c[0,6,6,2] = 0.9
+            bboxes,labels,probs,index,lens = wop.center_boxes_decode(heatmaps_tl=tl,heatmaps_br=br,heatmaps_c=c,offset_tl=offset_tl,
+                                                               offset_br=offset_br,offset_c=offset_c,k=10)
+            bboxes,labels,probs,index,lens = sess.run([bboxes,labels,probs,index,lens])
+            t_bboxes = [[[0.0, 0.0, 0.25, 0.25],
+              [0.625, 0.625, 0.875, 0.875]]
+             ]
+            t_labels = [[0, 2]]
+            t_probs = [[1.0,0.800000011920929]]
+            t_indexs = [[10, 60]]
+            t_lens = [2]
+            self.assertAllClose(bboxes,t_bboxes,atol=1e-5)
+            self.assertAllClose(t_probs,probs,atol=1e-5)
+            self.assertAllEqual(t_labels,labels)
+            self.assertAllEqual(t_indexs,index)
+            self.assertAllEqual(t_lens,lens)
+            wmlu.show_nparray(bboxes)
+            wmlu.show_nparray(labels)
+            wmlu.show_nparray(probs)
+            wmlu.show_nparray(index)
+            wmlu.show_nparray(lens)
 
 if __name__ == "__main__":
     random.seed(int(time.time()))

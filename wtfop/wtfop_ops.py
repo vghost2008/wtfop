@@ -194,6 +194,10 @@ def center_boxes_encode(gbboxes, glabels,glength,output_size,num_classes=2,max_b
     output_size=output_size,num_classes=num_classes,max_box_nr=max_box_nr,gaussian_iou=gaussian_iou)
     return out[0],out[1],out[2],out[3],out[4]
 
+def center_boxes_decode(heatmaps_tl,heatmaps_br,heatmaps_c,offset_tl,offset_br,offset_c,k=100):
+    out = wtfop_module.center_boxes_decode(heatmaps_tl=heatmaps_tl,heatmaps_br=heatmaps_br,heatmaps_c=heatmaps_c,offset_tl=offset_tl,offset_br=offset_br,offset_c=offset_c,k=k)
+    return out[0],out[1],out[2],out[3],out[4]
+
 '''
  * prio_scaling:[4]
  * bottom_boxes:[X,4](ymin,xmin,ymax,xmax) 候选box,相对坐标
