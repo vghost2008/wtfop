@@ -229,7 +229,6 @@ class CenterBoxesDecodeOp: public OpKernel {
     public:
         explicit CenterBoxesDecodeOp(OpKernelConstruction* context) : OpKernel(context) {
             OP_REQUIRES_OK(context, context->GetAttr("k", &k_));
-            cout<<"K="<<k_<<endl;
         }
         void Compute(OpKernelContext* context) override
         {
@@ -281,7 +280,6 @@ class CenterBoxesDecodeOp: public OpKernel {
                     fill_pos(offset_c,c,i,j);
                     auto tboxes = get_boxes(tl,br,c);
                     vector<int> tlabels(tboxes.size(),j);
-                    cout<<"tboxes len:"<<tboxes.size()<<endl;
                     boxes.insert(boxes.end(),tboxes.begin(),tboxes.end());
                     labels.insert(labels.end(),tlabels.begin(),tlabels.end());
                 }
@@ -336,12 +334,10 @@ class CenterBoxesDecodeOp: public OpKernel {
                     o_indexs(i,j) = box.index;
                 }
                 o_lens(i) = b_it->size();
-                cout<<"Size:"<< b_it->size()<<endl;
             }
         }
         template<typename DT>
             vector<InterData> get_top_k(const DT& heatmaps,int batch_index,int class_index,int k) {
-                TIME_THISV1(__func__);
                 const auto H = heatmaps.dimension(1);
                 const auto W = heatmaps.dimension(2);
                 vector<InterData> res;
@@ -360,7 +356,6 @@ class CenterBoxesDecodeOp: public OpKernel {
             }
         template<typename DT>
             void fill_pos(const DT& offsets,vector<InterData>& data,int batch_index,int class_index) {
-                TIME_THISV1(__func__);
                 const auto H = offsets.dimension(1);
                 const auto W = offsets.dimension(2);
                 const auto dw = 1.0/(H-1);
@@ -377,7 +372,6 @@ class CenterBoxesDecodeOp: public OpKernel {
                 }
             }
         vector<Box> get_boxes(const vector<InterData>& tl,const vector<InterData>& br,const vector<InterData>& c) {
-            TIME_THISV1(__func__);
             const auto nr_i = tl.size();
             const auto nr_j = br.size();
             const auto nr_k = c.size();

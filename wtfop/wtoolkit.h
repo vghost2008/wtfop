@@ -45,7 +45,7 @@ typename T::Scalar* chip_data(const T& v,int offset)
 {
     return v.data()+offset*dims_prod(v,0);
 }
-#define _TT_
+//#define _TT_
 
 #ifdef _TT_
 #define TIME_THIS() WTimeThis tt__(std::string(__func__)+":"+std::to_string(__LINE__)+":"+__FILE__)
