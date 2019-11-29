@@ -163,6 +163,7 @@ class BoxesEncodeOp<CPUDevice,T>: public OpKernel {
 		float         neg_threshold;
 		vector<float> prio_scaling;
 };
+#ifdef GOOGLE_CUDA
 template <typename T>
 class BoxesEncodeOp<GPUDevice,T>: public OpKernel {
 	public:
@@ -248,6 +249,7 @@ class BoxesEncodeOp<GPUDevice,T>: public OpKernel {
 		float         neg_threshold;
 		vector<float> prio_scaling;
 };
+#endif
 REGISTER_KERNEL_BUILDER(Name("BoxesEncode").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesEncodeOp<CPUDevice, float>);
 #ifdef GOOGLE_CUDA
 REGISTER_KERNEL_BUILDER(Name("BoxesEncode").Device(DEVICE_GPU).TypeConstraint<float>("T"), BoxesEncodeOp<GPUDevice, float>);

@@ -94,7 +94,7 @@ T bboxes_jaccard_of_box0(const T* box0, const T* box1)
 	return int_vol/box0_vol;
 }
 template<typename T0,typename T1>
-auto bboxes_jaccard_of_box0v1(const T0& box0, const T1& box1)
+float bboxes_jaccard_of_box0v1(const T0& box0, const T1& box1)
 {
 	const auto int_ymin = std::max(box0(0),box1(0));
 	const auto int_xmin = std::max(box0(1),box1(1));
@@ -422,5 +422,27 @@ class BoxesEncodeUnit<Eigen::GpuDevice,T> {
 };
 void bboxes_decode_by_gpu(const float* anchor_bboxes,const float* regs,const float* prio_scaling,float* out_bboxes,size_t data_nr);
 #else
-#error "No cuda support"
+//#error "No cuda support"
 #endif
+
+inline float get_gaussian_radius(float height,float width,float min_overlap)
+{
+    auto a1 = 1;
+    auto b1 = (height+width);
+    auto c1 = width*height*(1-min_overlap)/(1+min_overlap);
+    auto sq1 = sqrt(b1*b1-4*a1*c1);
+    auto r1 = (b1+sq1)/2;
+
+    auto a2 = 4;
+    auto b2 = 2*(height+width);
+    auto c2 = width*height*(1-min_overlap);
+    auto sq2 = sqrt(b2*b2-4*a2*c2);
+    auto r2 = (b2+sq2)/2;
+
+    auto a3 = 4*min_overlap;
+    auto b3 = -2*min_overlap*(height+width);
+    auto c3 = -width*height*(1-min_overlap);
+    auto sq3 = sqrt(b3*b3-4*a3*c3);
+    auto r3 = (b3+sq3)/2;
+    return std::min<float>({r1,r2,r3});
+}

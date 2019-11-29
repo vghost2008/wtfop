@@ -111,7 +111,7 @@ def _boxes_nms_nr_grad(op, grad, _,_0):
 def boxes_nms_nr2(bboxes, classes, k=128,threshold=0.8,classes_wise=True,confidence=None):
     if classes.dtype != tf.int32:
         classes = tf.cast(classes,tf.int32)
-    out = wtfop_module.boxes_nms_nr2(bottom_box=bboxes,classes=classes,k=k,threshold=threshold,classes_wise=classes_wise)
+    out = wtfop_module.boxes_nms_nr2(bottom_box=bboxes,classes=classes,confidence=confidence,k=k,threshold=threshold,classes_wise=classes_wise)
     return out[0],out[1],tf.cast(out[2],tf.int32)
 
 
@@ -185,6 +185,17 @@ def boxes_encode(bboxes, gboxes,glabels,length,pos_threshold=0.7,neg_threshold=0
         bboxes = tf.expand_dims(bboxes,axis=0)
     out = wtfop_module.boxes_encode(bottom_boxes=bboxes,bottom_gboxes=gboxes,bottom_glength=length,bottom_glabels=glabels,
     pos_threshold=pos_threshold,neg_threshold=neg_threshold,prio_scaling=prio_scaling)
+    return out[0],out[1],out[2],out[3],out[4]
+
+def center_boxes_encode(gbboxes, glabels,glength,output_size,num_classes=2,max_box_nr=32,gaussian_iou=0.7):
+    if glabels.dtype != tf.int32:
+        glabels= tf.cast(glabels,tf.int32)
+    out = wtfop_module.center_boxes_encode(gbboxes=gbboxes,glabels=glabels,glength=glength,
+    output_size=output_size,num_classes=num_classes,max_box_nr=max_box_nr,gaussian_iou=gaussian_iou)
+    return out[0],out[1],out[2],out[3],out[4]
+
+def center_boxes_decode(heatmaps_tl,heatmaps_br,heatmaps_c,offset_tl,offset_br,offset_c,k=100):
+    out = wtfop_module.center_boxes_decode(heatmaps_tl=heatmaps_tl,heatmaps_br=heatmaps_br,heatmaps_c=heatmaps_c,offset_tl=offset_tl,offset_br=offset_br,offset_c=offset_c,k=k)
     return out[0],out[1],out[2],out[3],out[4]
 
 '''

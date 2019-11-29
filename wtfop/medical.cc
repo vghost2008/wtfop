@@ -385,7 +385,7 @@ class MergeCharacterOp: public OpKernel {
             }
         static inline bool is_horizontal_text(const vector<bbox_info_t>& infos) {
             vector<int> is_hors(infos.size());
-            transform(infos.begin(),infos.end(),is_hors.begin(),[](auto& x){ return is_horizontal(get<2>(x));});
+            transform(infos.begin(),infos.end(),is_hors.begin(),[](const bbox_info_t& x){ return is_horizontal(get<2>(x));});
             return accumulate(is_hors.begin(),is_hors.end(),0)>(infos.size()/2);
         }
         static inline bool is_horizontal(const bbox_t& box) {

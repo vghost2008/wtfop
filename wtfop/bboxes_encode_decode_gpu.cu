@@ -319,9 +319,11 @@ size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold)
 }
 void bboxes_decode_by_gpu(const float* anchor_bboxes,const float* regs,const float* prio_scaling,float* out_bboxes,size_t data_nr)
 {
-    const auto d_prio_scaling = make_cuda_unique<float>(prio_scaling,4);
-    const auto block_size     = std::min<size_t>(data_nr,128);
-    const auto grid_size      = (data_nr+block_size-1)/block_size;
+    if(0 == data_nr) 
+        return;
+    cuda_unique_ptr<float> d_prio_scaling = make_cuda_unique<float>(prio_scaling,4);
+    const auto block_size = std::min<size_t>(data_nr,128);
+    const auto grid_size = (data_nr+block_size-1)/block_size;
 
     bboxes_decode_kernel<<<grid_size,block_size>>>(anchor_bboxes,regs,d_prio_scaling.get(),out_bboxes,data_nr);
     CHECK_CUDA_ERRORS(cudaPeekAtLastError());
