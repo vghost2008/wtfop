@@ -580,7 +580,8 @@ class DecodeBoxes1Op<GPUDevice,T>: public OpKernel {
 			OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
 
 			auto output = output_tensor->template flat<T>();
-            bboxes_decode_by_gpu(bottom_boxes_flat.data(),bottom_regs_flat.data(),prio_scaling.data(),output.data(),nr);
+            if(nr>0)
+                bboxes_decode_by_gpu(bottom_boxes_flat.data(),bottom_regs_flat.data(),prio_scaling.data(),output.data(),nr);
 		}
 	private:
 		std::vector<float> prio_scaling;

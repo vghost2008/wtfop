@@ -244,20 +244,19 @@ __global__ void bboxes_decode_kernel(const float* anchor_bboxes,const float* reg
     float      x;
     float      href;
     float      wref;
-    auto xywh = cuda_box_minmax_to_cxywh(box_data);
+    auto       xywh        = cuda_box_minmax_to_cxywh(box_data);
 
     y = std::get<0>(xywh);
     x = std::get<1>(xywh);
     href = std::get<2>(xywh);
     wref = std::get<3>(xywh);
 
-    auto cy          = clamp<float>(regs_data[0]*prio_scaling[0],-10.0f,10.0f)*href+y;
-    auto cx          = clamp<float>(regs_data[1]*prio_scaling[1],-10.0f,10.0f)*wref+x;
-    auto h           = href *exp(clamp<float>(regs_data[2]*prio_scaling[2],-10.0,10.0));
-    auto w           = wref *exp(clamp<float>(regs_data[3]*prio_scaling[3],-10.0,10.0));
-    auto output_data = out_bboxes + base_offset;
-
-    auto minmax = cuda_box_cxywh_to_minmax(cy,cx,h,w);
+    auto       cy          = clamp<float>(regs_data[0] *prio_scaling[0],-10.0f,10.0f) *href+y;
+    auto       cx          = clamp<float>(regs_data[1] *prio_scaling[1],-10.0f,10.0f) *wref+x;
+    auto       h           = href *exp(clamp<float>(regs_data[2] *prio_scaling[2],-10.0,10.0));
+    auto       w           = wref *exp(clamp<float>(regs_data[3] *prio_scaling[3],-10.0,10.0));
+    auto       output_data = out_bboxes + base_offset;
+    const auto minmax      = cuda_box_cxywh_to_minmax(cy,cx,h,w);
 
     output_data[0] = clamp<float>(std::get<0>(minmax),0.0,1.0);
     output_data[1] = clamp<float>(std::get<1>(minmax),0.0,1.0);
@@ -320,12 +319,12 @@ size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold)
 }
 void bboxes_decode_by_gpu(const float* anchor_bboxes,const float* regs,const float* prio_scaling,float* out_bboxes,size_t data_nr)
 {
-    cuda_unique_ptr<float> d_prio_scaling = make_cuda_unique<float>(prio_scaling,4);
-    const auto block_size = std::min<size_t>(data_nr,128);
-    const auto grid_size = (data_nr+block_size-1)/block_size;
+    const auto d_prio_scaling = make_cuda_unique<float>(prio_scaling,4);
+    const auto block_size     = std::min<size_t>(data_nr,128);
+    const auto grid_size      = (data_nr+block_size-1)/block_size;
 
     bboxes_decode_kernel<<<grid_size,block_size>>>(anchor_bboxes,regs,d_prio_scaling.get(),out_bboxes,data_nr);
     CHECK_CUDA_ERRORS(cudaPeekAtLastError());
-   cudaDeviceSynchronize(); 
+    cudaDeviceSynchronize(); 
 }
 #endif

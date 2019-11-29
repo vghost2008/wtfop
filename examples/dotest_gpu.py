@@ -8,7 +8,7 @@ import wml_utils as wmlu
 import random
 import time
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '5'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 class WTFOPTest(tf.test.TestCase):
     @staticmethod
@@ -185,7 +185,7 @@ class WTFOPTest(tf.test.TestCase):
                                          [0.09999999,0.09999999,0.4,0.4],
                                          [0.6999999,0.7,0.9,0.8],
                                          [0.3,0.3,0.5,0.6]])
-            self.assertAllClose(a=out_new_boxes,b=target_new_boxes,atol=1e-5,rtol=0.)
+            self.assertAllClose(a=out_new_boxes,b=target_new_boxes,atol=1e-5,rtol=0.)'''
 
     def testEncodeBoxesSpeed(self):
         config = tf.ConfigProto()
@@ -227,9 +227,9 @@ class WTFOPTest(tf.test.TestCase):
                 out_boxes, gout_labels, gout_scores, out_remove_indices,gout_indices = sess.run([out_boxes0, out_labels0, out_scores0, out_remove_indices0,indices0])
             print(cout_indices.shape,gout_labels.shape)
             self.assertAllEqual(a=cout_indices,b=gout_indices)
-            self.assertAllEqual(a=cout_labels,b=gout_labels)'''
+            self.assertAllEqual(a=cout_labels,b=gout_labels)
 
-    def testDecodeBBoxes(self):
+    '''def testDecodeBBoxesSpeed(self):
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
         with self.test_session(config=config) as sess:
@@ -246,7 +246,7 @@ class WTFOPTest(tf.test.TestCase):
                 cout = sess.run(cout)
             with wmlu.TimeThis("GPUDecode-----------"):
                 gout = sess.run(gout)
-            self.assertAllClose(a=cout,b=gout,atol=1e-4,rtol=0.)
+            self.assertAllClose(a=cout,b=gout,atol=1e-4,rtol=0.)'''
 
 if __name__ == "__main__":
     random.seed(int(time.time()))
