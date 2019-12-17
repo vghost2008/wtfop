@@ -236,10 +236,11 @@ class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
 			int index; //与当前box对应的gbbox序号
 			float iou;//与其对应的gbbox的IOU
 		};
-		explicit BoxesEncodeUnit(float pos_threshold,float neg_threshold,const std::vector<float>& prio_scaling) 
+		explicit BoxesEncodeUnit(float pos_threshold,float neg_threshold,const std::vector<float>& prio_scaling,bool max_overlap_as_pos=true) 
 			:pos_threshold_(pos_threshold)
 			 ,neg_threshold_(neg_threshold)
-			 ,prio_scaling_(prio_scaling){
+			 ,prio_scaling_(prio_scaling)
+             ,max_overlap_as_pos_(max_overlap_as_pos){
 				 assert(prio_scaling_.size() == 4);
 			 }
         template<typename _T>
@@ -322,7 +323,7 @@ class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
 					 */
 					auto j = max_index;
 
-                    {
+                    if(max_overlap_as_pos_) {
                         std::lock_guard<std::mutex> g(mtx);
                         if((out_scores(j) <= max_scores) || (!is_max_score[j])) {
                             out_scores(j) = max_scores;
@@ -391,6 +392,7 @@ class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
 		const float              pos_threshold_;
 		const float              neg_threshold_;
 		const std::vector<float> prio_scaling_;
+		bool                     max_overlap_as_pos_ = true;
 };
 #ifdef GOOGLE_CUDA
 void get_encodes(const float* gbboxes,const float* anchor_bboxes,const int* glabels,
@@ -399,10 +401,11 @@ size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold);
 template <typename T>
 class BoxesEncodeUnit<Eigen::GpuDevice,T> {
     public:
-        explicit BoxesEncodeUnit(float pos_threshold,float neg_threshold,const std::vector<float>& prio_scaling) 
+        explicit BoxesEncodeUnit(float pos_threshold,float neg_threshold,const std::vector<float>& prio_scaling,bool max_overlap_as_pos) 
             :pos_threshold_(pos_threshold)
              ,neg_threshold_(neg_threshold)
-             ,prio_scaling_(prio_scaling){
+             ,prio_scaling_(prio_scaling)
+             ,max_overlap_as_pos_(max_overlap_as_pos){
                  assert(prio_scaling_.size() == 4);
              }
         void operator()(
@@ -413,12 +416,13 @@ class BoxesEncodeUnit<Eigen::GpuDevice,T> {
         {
             get_encodes(gboxes,boxes,glabels,
                     out_bboxes,out_scores,out_labels,out_remove_indict,out_index,prio_scaling_.data(),
-                    gdata_nr,data_nr,neg_threshold_,pos_threshold_);
+                    gdata_nr,data_nr,neg_threshold_,pos_threshold_,max_overlap_as_pos_);
         }
     private:
         const float              pos_threshold_;
         const float              neg_threshold_;
         const std::vector<float> prio_scaling_;
+        bool                     max_overlap_as_pos_ = true;
 };
 void bboxes_decode_by_gpu(const float* anchor_bboxes,const float* regs,const float* prio_scaling,float* out_bboxes,size_t data_nr);
 #else

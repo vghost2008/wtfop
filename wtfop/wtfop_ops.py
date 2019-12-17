@@ -178,13 +178,13 @@ def e_boxes_nms(bboxes, classes, threshold=0.45,k=0):
     out = wtfop_module.e_boxes_nms(bottom_box=bboxes,classes=classes,threshold=threshold,k=k)
     return out[0],out[1],tf.cast(out[2],tf.int32)
 
-def boxes_encode(bboxes, gboxes,glabels,length,pos_threshold=0.7,neg_threshold=0.3,prio_scaling=[0.1,0.1,0.2,0.2]):
+def boxes_encode(bboxes, gboxes,glabels,length,pos_threshold=0.7,neg_threshold=0.3,prio_scaling=[0.1,0.1,0.2,0.2],max_overlap_as_pos=True):
     if glabels.dtype != tf.int32:
         glabels= tf.cast(glabels,tf.int32)
     if bboxes.get_shape().ndims != 3:
         bboxes = tf.expand_dims(bboxes,axis=0)
     out = wtfop_module.boxes_encode(bottom_boxes=bboxes,bottom_gboxes=gboxes,bottom_glength=length,bottom_glabels=glabels,
-    pos_threshold=pos_threshold,neg_threshold=neg_threshold,prio_scaling=prio_scaling)
+    pos_threshold=pos_threshold,neg_threshold=neg_threshold,prio_scaling=prio_scaling,max_overlap_as_pos=max_overlap_as_pos)
     return out[0],out[1],out[2],out[3],out[4]
 
 def center_boxes_encode(gbboxes, glabels,glength,output_size,num_classes=2,max_box_nr=32,gaussian_iou=0.7):
@@ -337,3 +337,9 @@ def _roi_pool_grad(op, grad, _):
   data_grad = wtfop_module.roi_pooling_grad(data, rois, argmax, grad, pooled_height, pooled_width, spatial_scale)
 
   return [data_grad, None]
+
+def median_blur(image,ksize=5):
+    return wtfop_module.median_blur(image=image,ksize=ksize)
+
+def bilateral_filter(image,d=5,sigmaColor=5,sigmaSpace=4):
+    return wtfop_module.bilateral_filter(image=image,d=d,sigmaColor=sigmaColor,sigmaSpace=sigmaSpace)

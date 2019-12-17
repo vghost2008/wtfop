@@ -270,7 +270,7 @@ __global__ void bboxes_decode_kernel(const float* anchor_bboxes,const float* reg
 }
 __host__ void get_encodes(const float* gbboxes,const float* anchor_bboxes,const int* glabels,
 float* out_boxes,float* out_scores,int* out_labels,bool* out_remove_indices,int* out_index,const float* prio_scaling,
-size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold)
+size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold,bool max_overlap_as_pos=true)
 {
     cuda_unique_ptr<int> g_out_index;
 
@@ -302,7 +302,8 @@ size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold)
 
     cuda_unique_ptr<bool> d_is_max_score = make_cuda_unique<bool>((unsigned char)(0x00),ab_size);
 
-    update_indexs_and_scores_by_max_score<<<grid,std::min<size_t>(kBlockSize,gb_size)>>>(out_index,d_indexs0.get(),out_scores,d_scores0.get(),d_is_max_score.get(),gb_size,ab_size);
+    if(max_overlap_as_pos)
+        update_indexs_and_scores_by_max_score<<<grid,std::min<size_t>(kBlockSize,gb_size)>>>(out_index,d_indexs0.get(),out_scores,d_scores0.get(),d_is_max_score.get(),gb_size,ab_size);
     cudaDeviceSynchronize();
     CHECK_CUDA_ERRORS(cudaPeekAtLastError());
 
