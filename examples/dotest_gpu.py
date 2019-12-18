@@ -212,7 +212,7 @@ class WTFOPTest(tf.test.TestCase):
                                                                                  length=lens,
                                                                                  pos_threshold=0.7,
                                                                                  neg_threshold=0.3,
-                                                                                 prio_scaling=[0.1, 0.1, 0.2, 0.2])
+                                                                                 prio_scaling=[0.1, 0.1, 0.2, 0.2],max_overlap_as_pos=False)
             with tf.device("/gpu:0"):
                 out_boxes0, out_labels0, out_scores0, out_remove_indices0,indices0 = boxes_encode(boxes,
                                                                                  gboxes,
@@ -220,12 +220,12 @@ class WTFOPTest(tf.test.TestCase):
                                                                                  length=lens,
                                                                                  pos_threshold=0.7,
                                                                                  neg_threshold=0.3,
-                                                                                 prio_scaling=[0.1, 0.1, 0.2, 0.2])
+                                                                                 prio_scaling=[0.1, 0.1, 0.2, 0.2],max_overlap_as_pos=False)
             with wmlu.TimeThis("CPU"):
                 out_boxes, cout_labels, cout_scores, out_remove_indices,cout_indices = sess.run([out_boxes, out_labels, out_scores, out_remove_indices,indices])
             with wmlu.TimeThis("GPU"):
                 out_boxes, gout_labels, gout_scores, out_remove_indices,gout_indices = sess.run([out_boxes0, out_labels0, out_scores0, out_remove_indices0,indices0])
-            print(cout_indices.shape,gout_labels.shape)
+            print("Test0:",cout_indices.shape,gout_labels.shape)
             self.assertAllEqual(a=cout_indices,b=gout_indices)
             self.assertAllEqual(a=cout_labels,b=gout_labels)
 

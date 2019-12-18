@@ -274,6 +274,7 @@ REGISTER_OP("BoxesEncode1")
 	.Attr("pos_threshold:float")
 	.Attr("neg_threshold:float")
  	.Attr("prio_scaling: list(float)")
+ 	.Attr("max_overlap_as_pos: bool")
     .Input("bottom_boxes: T")
     .Input("bottom_gboxes: T")
     .Input("bottom_glabels: int32")
@@ -306,6 +307,7 @@ class BoxesEncode1Op<CPUDevice,T>: public OpKernel {
 			OP_REQUIRES_OK(context, context->GetAttr("pos_threshold", &pos_threshold));
 			OP_REQUIRES_OK(context, context->GetAttr("neg_threshold", &neg_threshold));
 			OP_REQUIRES_OK(context, context->GetAttr("prio_scaling", &prio_scaling));
+			OP_REQUIRES_OK(context, context->GetAttr("max_overlap_as_pos", &max_overlap_as_pos_));
 			OP_REQUIRES(context, prio_scaling.size() == 4, errors::InvalidArgument("prio scaling data must be shape[4]"));
 		}
 
@@ -347,7 +349,7 @@ class BoxesEncode1Op<CPUDevice,T>: public OpKernel {
 			auto output_scores_tensor        = output_scores->template tensor<T,1>();
 			auto output_remove_indict_tensor = output_remove_indict->template tensor<bool,1>();
 
-			BoxesEncodeUnit<CPUDevice,T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
+			BoxesEncodeUnit<CPUDevice,T> encode_unit(pos_threshold,neg_threshold,prio_scaling,max_overlap_as_pos_);
 			auto &boxes              = bottom_boxes;
 			auto &gboxes             = bottom_gboxes;
 			auto &glabels            = bottom_glabels;
@@ -366,6 +368,7 @@ class BoxesEncode1Op<CPUDevice,T>: public OpKernel {
 		float         pos_threshold;
 		float         neg_threshold;
 		vector<float> prio_scaling;
+        bool max_overlap_as_pos_ = true;
 };
 template <typename T>
 class BoxesEncode1Op<GPUDevice,T>: public OpKernel {
@@ -378,6 +381,7 @@ class BoxesEncode1Op<GPUDevice,T>: public OpKernel {
 			OP_REQUIRES_OK(context, context->GetAttr("pos_threshold", &pos_threshold));
 			OP_REQUIRES_OK(context, context->GetAttr("neg_threshold", &neg_threshold));
 			OP_REQUIRES_OK(context, context->GetAttr("prio_scaling", &prio_scaling));
+			OP_REQUIRES_OK(context, context->GetAttr("max_overlap_as_pos", &max_overlap_as_pos_));
 			OP_REQUIRES(context, prio_scaling.size() == 4, errors::InvalidArgument("prio scaling data must be shape[4]"));
 		}
 
@@ -419,7 +423,7 @@ class BoxesEncode1Op<GPUDevice,T>: public OpKernel {
             auto output_scores_tensor        = output_scores->template tensor<T,1>();
             auto output_remove_indict_tensor = output_remove_indict->template tensor<bool,1>();
 
-            BoxesEncodeUnit<GPUDevice,T> encode_unit(pos_threshold,neg_threshold,prio_scaling);
+            BoxesEncodeUnit<GPUDevice,T> encode_unit(pos_threshold,neg_threshold,prio_scaling,max_overlap_as_pos_);
             auto size    = bottom_gboxes.dimension(0);
             auto boxes   = bottom_boxes.data();
             auto gboxes  = bottom_gboxes.data();
@@ -438,6 +442,7 @@ class BoxesEncode1Op<GPUDevice,T>: public OpKernel {
 		float         pos_threshold;
 		float         neg_threshold;
 		vector<float> prio_scaling;
+        bool max_overlap_as_pos_ = true;
 };
 
 REGISTER_OP("BoxesEncode1Grad")

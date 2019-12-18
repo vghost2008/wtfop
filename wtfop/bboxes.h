@@ -397,7 +397,7 @@ class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
 #ifdef GOOGLE_CUDA
 void get_encodes(const float* gbboxes,const float* anchor_bboxes,const int* glabels,
 float* out_boxes,float* out_scores,int* out_labels,bool* out_remove_indices,int* out_index,const float* prio_scaling,
-size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold);
+size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold,bool max_overlap_as_pos);
 template <typename T>
 class BoxesEncodeUnit<Eigen::GpuDevice,T> {
     public:

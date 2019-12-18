@@ -25,8 +25,9 @@ typedef Eigen::ThreadPoolDevice CPUDevice;
  * 
  * bbox:[Nr,4](ymin,xmin,ymax,xmax)
  * labels:[Nr]
- * dlabels:[Nr]
+ * dlabels:[Nr], direction
  * type:[1]
+ * super_box_type: 词的类型，如1~67表示不同的字符，68表示词，那么super_box_type=68
  */
 REGISTER_OP("MergeCharacter")
     .Attr("T: {float, double,int32}")
@@ -44,9 +45,12 @@ REGISTER_OP("MergeCharacter")
 template <typename Device, typename T>
 class MergeCharacterOp: public OpKernel {
     public:
-            using bbox_t = Eigen::Tensor<T,1,Eigen::RowMajor>;
-            using bbox_info_t = tuple<bbox_t,int,int,int>;
-            using self_type_t = MergeCharacterOp<Device,T>;
+        using bbox_t = Eigen::Tensor<T,1,Eigen::RowMajor>;
+        /*
+         * 分别表示当前box数据，标签，方向标签，所属的super_box
+         */
+        using bbox_info_t = tuple<bbox_t,int,int,int>;
+        using self_type_t = MergeCharacterOp<Device,T>;
 	public:
 		explicit MergeCharacterOp(OpKernelConstruction* context) : OpKernel(context) {
 			OP_REQUIRES_OK(context, context->GetAttr("expand", &expand_));
@@ -69,7 +73,7 @@ class MergeCharacterOp: public OpKernel {
             const auto     data_nr              = _bboxes.dim_size(0);
             vector<bbox_t> super_boxes;
             list<vector<int>> res_texts;
-
+            //提取出所有的词
             for(auto i=0; i<data_nr; ++i) {
                 if(labels(i) != super_box_type_)continue;
                 try {
@@ -78,6 +82,7 @@ class MergeCharacterOp: public OpKernel {
                 } catch(...) {
                 }
             }
+
             super_boxes = remove_bad_super_bboxes(super_boxes,bboxes,labels);
             super_boxes = merge_super_bboxes(super_boxes);
             finetune_super_boxes(super_boxes,bboxes,labels);
@@ -195,6 +200,9 @@ class MergeCharacterOp: public OpKernel {
             bbox_t env_bbox0(4);
             bbox_t env_bbox1(4);
             if(is_h) {
+                /*
+                 * 水平时，env_bbox0表示包围的上半部分，env_bbox1表示包围的下半部分
+                 */
                 env_bbox0(0) = miny;
                 env_bbox0(1) = minx;
                 env_bbox0(2) = miny+(maxy-miny)/2.0;
@@ -204,6 +212,9 @@ class MergeCharacterOp: public OpKernel {
                 env_bbox1(2) = maxy;
                 env_bbox1(3) = maxx;
             } else {
+                /*
+                 * 垂直时，env_bbox0表示包围的左半部分，env_bbox1表示包围的右半部分
+                 */
                 env_bbox0(0) = miny;
                 env_bbox0(1) = minx;
                 env_bbox0(2) = maxx;
@@ -253,6 +264,9 @@ class MergeCharacterOp: public OpKernel {
             }
             return res;
         }
+        /*
+         * 确定boxes所属的super_box, 返回值中为super_boxes的序号
+         */
         template<typename BT,typename LT>
             vector<int> get_bboxes_type(const vector<bbox_t>& super_boxes,const BT& bboxes,const LT& labels) {
                 const auto data_nr = labels.dimension(0);
@@ -260,7 +274,9 @@ class MergeCharacterOp: public OpKernel {
                 vector<int>   bboxes_type(size_t(data_nr),-1);
 
                 bbox_iou.reserve(super_boxes.size());
-
+                /*
+                 * 当box与super_box有交叉时，按交叉面积确定box所属的super_box
+                 */
                 for(auto i=0; i<data_nr; ++i) {
                     if(labels(i) == super_box_type_) continue;
 
@@ -278,6 +294,10 @@ class MergeCharacterOp: public OpKernel {
                     if(*it >= 0.333)
                         bboxes_type[i] = int(distance(bbox_iou.begin(),it));
                 }
+                /*
+                 * 当通过上一步无法确定当前box的类型时，通过投影到某个轴来确定box所属的super_box
+                 * 投影方向按测试的super_box确定
+                 */
                 for(auto i=0; i<data_nr; ++i) {
                     if((labels(i) == super_box_type_) || (bboxes_type[i] != -1)) continue;
 
@@ -353,6 +373,9 @@ class MergeCharacterOp: public OpKernel {
                 bbox(0) = std::max(bbox(0),ref_bbox(2));
             }
         }
+        /*
+         * 只取一个维度，如is_h为真，表示在x轴上的投影的交叉部分点并集的百分比
+         */
         static float iou(const bbox_t& lhv,const bbox_t& rhv,bool is_h) {
             float union_v = 0.0;
             float int_v = 0.0;
@@ -367,6 +390,9 @@ class MergeCharacterOp: public OpKernel {
                 return 0.0f;
             return int_v/union_v;
         }
+        /*
+         * 返回super_box与bbox交叉面积占bbox的百分比
+         */
         static float iou(const bbox_t& super_box,const bbox_t& bbox) {
             return bboxes_jaccard_of_box0v1(bbox,super_box);
         }
@@ -383,6 +409,9 @@ class MergeCharacterOp: public OpKernel {
                     return accumulate(is_hors.begin(),is_hors.end(),0)>(boxes.size()/2);
                 }
             }
+        /*
+         * 通过输入中的方向信息投票确定是否为水平方向
+         */
         static inline bool is_horizontal_text(const vector<bbox_info_t>& infos) {
             vector<int> is_hors(infos.size());
             transform(infos.begin(),infos.end(),is_hors.begin(),[](const bbox_info_t& x){ return is_horizontal(get<2>(x));});
