@@ -25,7 +25,12 @@ typedef Eigen::ThreadPoolDevice CPUDevice;
  * scales:list of float
  * aspect_ratios: list of floats
  * shape:[H,W]
- * size:[h,w]: use the same metrics as scales does
+ * size:[h,w]: whole image size, use the same metrics as scales does，for example scales use relative unit (0.1,0.2) then size is (1,1)
+ * scales use pixel unit (128,128), then size use input image size (640,800)
+ * output:
+ * [out_nr,4], out_nr=len(scales)*len(aspect_ratios)*shape[0]*shape[1]
+ * 表示每个位置，每个比率，每个尺寸的anchor box
+ * 即[box0(s0,r0),box1(s1,r0),box2(s0,r1),box3(s1,r1),...]
  */
 REGISTER_OP("AnchorGenerator")
     .Attr("scales: list(float)")
@@ -43,9 +48,7 @@ class AnchorGeneratorOp: public OpKernel {
 	public:
 		explicit AnchorGeneratorOp(OpKernelConstruction* context) : OpKernel(context) {
 			OP_REQUIRES_OK(context, context->GetAttr("scales", &scales_));
-            vector<float> aspect_ratios;
-			OP_REQUIRES_OK(context, context->GetAttr("aspect_ratios", &aspect_ratios));
-            aspect_ratios_.assign(aspect_ratios.rbegin(),aspect_ratios.rend());
+			OP_REQUIRES_OK(context, context->GetAttr("aspect_ratios", &aspect_ratios_));
 		}
 
 		void Compute(OpKernelContext* context) override
@@ -81,8 +84,8 @@ class AnchorGeneratorOp: public OpKernel {
                     for(auto& a:aspect_ratios_) {
                         for(auto& s:scales_) {
                             const auto sa = sqrt(a);
-                            const auto hw = s/(2*in_size(1))/sa;
-                            const auto hh = s/(2*in_size(0))*sa;
+                            const auto hw = s/(2*in_size(1))*sa;
+                            const auto hh = s/(2*in_size(0))/sa;
                             oanchors(index,0) = y_pos-hh;
                             oanchors(index,1) = x_pos-hw;
                             oanchors(index,2) = y_pos+hh;
@@ -103,9 +106,13 @@ REGISTER_KERNEL_BUILDER(Name("AnchorGenerator").Device(DEVICE_CPU), AnchorGenera
 
 /*
  * scales:list of float
- * aspect_ratios: list of floats
+ * aspect_ratios: list of floats, len(scales)==len(aspect_ratios)
  * shape:[H,W]
  * size:[h,w]: use the same metrics as scales does
+ * output:
+ * [out_nr,4], out_nr=len(scales)*shape[0]*shape[1]
+ * 表示每个位置，每个比率及尺寸的组合的anchor box
+ * 即[box0(s0,r0),box1(s1,r1),box2(s0,r0),box3(s1,r1),...]
  */
 REGISTER_OP("MultiAnchorGenerator")
     .Attr("scales: list(float)")
@@ -124,13 +131,6 @@ class MultiAnchorGeneratorOp: public OpKernel {
         explicit MultiAnchorGeneratorOp(OpKernelConstruction* context) : OpKernel(context) {
             OP_REQUIRES_OK(context, context->GetAttr("scales", &scales_));
             OP_REQUIRES_OK(context, context->GetAttr("aspect_ratios", &aspect_ratios_));
-            const auto delta = 1e-3;
-            for(auto i=0; i<aspect_ratios_.size()-1; ++i) {
-                if((fabs(aspect_ratios_[i]*aspect_ratios_[i+1]-1.0)<delta)
-                        && (fabs(scales_[i]-scales_[i+1])<delta)
-                        && (aspect_ratios_[i]>aspect_ratios_[i+1]))
-                    swap(aspect_ratios_[i],aspect_ratios_[i+1]);
-            }
         }
 
 		void Compute(OpKernelContext* context) override
@@ -167,8 +167,8 @@ class MultiAnchorGeneratorOp: public OpKernel {
                         auto a = aspect_ratios_[k];
                         auto s = scales_[k];
                         const auto sa = sqrt(a);
-                        const auto hw = s/(2*in_size(1))/sa;
-                        const auto hh = s/(2*in_size(0))*sa;
+                        const auto hw = s/(2*in_size(1))*sa;
+                        const auto hh = s/(2*in_size(0))/sa;
                         oanchors(index,0) = y_pos-hh;
                         oanchors(index,1) = x_pos-hw;
                         oanchors(index,2) = y_pos+hh;

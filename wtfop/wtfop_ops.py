@@ -268,6 +268,10 @@ def anchor_generator(shape,size,scales,aspect_ratios):
         scales = scales.tolist()
     if isinstance(aspect_ratios,np.ndarray):
         aspect_ratios= aspect_ratios.tolist()
+    if not isinstance(size,tf.Tensor):
+        size = tf.convert_to_tesor(size)
+        if size.dtype != tf.float32:
+            size = tf.cast(size,tf.float32)
     res = wtfop_module.anchor_generator(shape=shape,size=size,scales=scales,aspect_ratios=aspect_ratios)
     if not isinstance(shape,tf.Tensor):
         data_nr = len(aspect_ratios)*len(scales)*shape[0]*shape[1]
