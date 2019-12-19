@@ -626,3 +626,74 @@ class MergeLineBoxesOp: public OpKernel {
 };
 REGISTER_KERNEL_BUILDER(Name("MergeLineBoxes").Device(DEVICE_CPU).TypeConstraint<int>("T"), MergeLineBoxesOp<CPUDevice, int>);
 REGISTER_KERNEL_BUILDER(Name("MergeLineBoxes").Device(DEVICE_CPU).TypeConstraint<tensorflow::int64>("T"), MergeLineBoxesOp<CPUDevice, tensorflow::int64>);
+
+/*
+ * limit:[min_size,max_size], satisfy max(out_size)<=max_size,min(out_size)>=min_size
+ * align:satisfy out_size[0]%align[0] == 0 and out_size[1]%align[1] == 0
+ * Try to keep the ratio constant
+ */
+REGISTER_OP("GetImageResizeSize")
+	.Attr("limit:list(int)") 
+	.Attr("align:list(int)")
+    .Input("size: int32")
+	.Output("output_size:int32")
+	.SetShapeFn(shape_inference::UnchangedShape);
+
+class GetImageResizeSizeOp: public OpKernel {
+        public:
+		explicit GetImageResizeSizeOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("limit", &limit_));
+			OP_REQUIRES_OK(context, context->GetAttr("align", &align_));
+		}
+
+		void Compute(OpKernelContext* context) override
+		{
+			const Tensor &_size = context->input(0);
+
+			OP_REQUIRES(context, _size.dims() == 1, errors::InvalidArgument("size must be 1-dimensional"));
+
+			auto          size= _size.tensor<int,1>();
+            int           out_size[2];
+            auto scale = 1.0;
+            if((limit_[0]>0) && (limit_[1]>0)) {
+                if(size(0)<size(1))
+                    scale = std::min(float(limit_[0])/size(0),float(limit_[1])/size(1));
+                else
+                    scale = std::min(float(limit_[0])/size(1),float(limit_[1])/size(0));
+            } else if(limit_[1]<1) {
+                if(size(0)<size(1))
+                    scale = float(limit_[0])/size(0);
+                else
+                    scale = float(limit_[0])/size(1);
+            } else if(limit_[0]<1) {
+                if(size(0)<size(1))
+                    scale = float(limit_[1])/size(1);
+                else
+                    scale = float(limit_[1])/size(0);
+            }
+            out_size[0] = size(0)*scale+0.5;
+            out_size[1] = size(1)*scale+0.5;
+            if(limit_[0]>0) {
+                if(out_size[0]<limit_[0]) 
+                    out_size[0] = limit_[0];
+                else if(out_size[1]<limit_[0])
+                    out_size[1] = limit_[0];
+            }
+
+            out_size[1] = ((out_size[1]+align_[1]-1)/align_[1])*align_[1];
+            out_size[0] = ((out_size[0]+align_[0]-1)/align_[0])*align_[0];
+
+            TensorShape  outshape0;
+            Tensor      *output_size = nullptr;
+            int          dims_1d0[1]  = {2};
+            TensorShapeUtils::MakeShape(dims_1d0, 1, &outshape0);
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_size));
+			auto       output_tensor = output_size->tensor<int,1>();      
+            output_tensor(0) = out_size[0];
+            output_tensor(1) = out_size[1];
+        }
+   private:
+    vector<int> limit_;
+    vector<int> align_;
+};
+REGISTER_KERNEL_BUILDER(Name("GetImageResizeSize").Device(DEVICE_CPU), GetImageResizeSizeOp);

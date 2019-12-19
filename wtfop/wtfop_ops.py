@@ -96,8 +96,11 @@ def boxes_nms_nr(bboxes, classes, confidence=None,k=128,max_loop=5,classes_wise=
     out = wtfop_module.boxes_nms_nr(bottom_box=bboxes,classes=classes,k=k,max_loop=max_loop,classes_wise=classes_wise)
     return out[0],out[1],tf.cast(out[2],tf.int32)
 
-def merge_character(bboxes, labels,dlabels, expand=0.01,super_box_type=68):
-    out = wtfop_module.merge_character(bboxes=bboxes,labels=labels,dlabels=dlabels,expand=expand,super_box_type=super_box_type)
+def merge_character(bboxes, labels,dlabels, expand=0.01,super_box_type=68,space_type=69):
+    out = wtfop_module.merge_character(bboxes=bboxes,labels=labels,dlabels=dlabels,expand=expand,super_box_type=super_box_type,space_type=space_type)
+    return out
+def simple_merge_character(labels,windex):
+    out = wtfop_module.simple_merge_character(labels=labels,windex=windex)
     return out
 
 def mach_words(targets, texts):
@@ -328,6 +331,17 @@ def sample_labels(labels,ids,sample_nr=1024):
 
 def merge_line_boxes(data,labels,bboxes,lens,threshold=0.5,dis_threshold=[0.1,0.1]):
     return wtfop_module.merge_line_boxes(data=data,labels=labels,bboxes=bboxes,lens=lens,threshold=threshold,dis_threshold=dis_threshold)
+
+def get_image_resize_size(size,limit,align=1):
+    if isinstance(limit,int):
+        limit = [1,limit]
+    elif not isinstance(limit,list):
+        limit = list(limit)
+    if isinstance(align,int):
+        align = [align,align]
+    elif not isinstance(align,list):
+        align = list(align)
+    return wtfop_module.get_image_resize_size(size=size,limit=limit,align=align)
 
 @ops.RegisterGradient("RoiPooling")
 def _roi_pool_grad(op, grad, _):
