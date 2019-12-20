@@ -655,7 +655,10 @@ class GetImageResizeSizeOp: public OpKernel {
 			auto          size= _size.tensor<int,1>();
             int           out_size[2];
             auto scale = 1.0;
-            if((limit_[0]>0) && (limit_[1]>0)) {
+            if((limit_[0]<1) && (limit_[1]<1)) {
+                out_size[0] = size(0);
+                out_size[1] = size(1);
+            } else if((limit_[0]>0) && (limit_[1]>0)) {
                 if(size(0)<size(1))
                     scale = std::min(float(limit_[0])/size(0),float(limit_[1])/size(1));
                 else

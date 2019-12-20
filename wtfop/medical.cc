@@ -1083,18 +1083,37 @@ class SimpleMergeCharacterOp: public OpKernel {
 
             vector<int> res;
             vector<int> char_index;
+            vector<int> cur_char;
+            vector<int> cur_index;
             auto last_word_index = nr>0?windex(0):0;
-            for(auto i=0; i<nr; ++i) {
-                if(last_word_index != windex(i)) {
+            auto strip = [this,&cur_char,&cur_index](){
+                while(!cur_char.empty() && (cur_char.front() == space_type_)) {
+                    cur_char.erase(cur_char.begin());
+                    cur_index.erase(cur_index.begin());
+                }
+                while(!cur_char.empty() && (cur_char.back() == space_type_)) {
+                    cur_char.erase(std::prev(cur_char.end()));
+                    cur_index.erase(std::prev(cur_index.end()));
+                }
+            };
+            auto insert_word = [&,this](){
+                    strip();
+                    res.insert(res.end(),cur_char.begin(),cur_char.end());
+                    char_index.insert(char_index.end(),cur_index.begin(),cur_index.end());
+                    cur_char.clear();
+                    cur_index.clear();
                     res.push_back(0);
                     char_index.push_back(-1);
+            };
+            for(auto i=0; i<nr; ++i) {
+                if(last_word_index != windex(i)) {
+                    insert_word();        
                 }
-                res.push_back(labels(i));
-                char_index.push_back(i);
+                cur_char.push_back(labels(i));
+                cur_index.push_back(i);
                 last_word_index = windex(i);
             }
-            res.push_back(0);
-            char_index.push_back(-1);
+            insert_word();        
 
             TensorShape  outshape0;
             Tensor      *output_labels = nullptr;
@@ -1111,5 +1130,7 @@ class SimpleMergeCharacterOp: public OpKernel {
                 index_data[i] = char_index[i];
             }
         }
+   private:
+    const int space_type_ = 69;
 };
 REGISTER_KERNEL_BUILDER(Name("SimpleMergeCharacter").Device(DEVICE_CPU), SimpleMergeCharacterOp<CPUDevice>);
