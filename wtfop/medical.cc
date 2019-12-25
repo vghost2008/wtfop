@@ -90,6 +90,8 @@ class MergeCharacterOp: public OpKernel {
             OP_REQUIRES(context, _bboxes.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
             OP_REQUIRES(context, _labels.dims() == 1, errors::InvalidArgument("labels data must be 1-dimensional"));
             OP_REQUIRES(context, _dlabels.dims() == 1, errors::InvalidArgument("dlabels data must be 1-dimensional"));
+            OP_REQUIRES(context, _dlabels.dim_size(0) == _bboxes.dim_size(0), errors::InvalidArgument("data size must be equal."));
+            OP_REQUIRES(context, _dlabels.dim_size(0) == _labels.dim_size(0), errors::InvalidArgument("data size must be equal."));
 
             const auto     data_nr              = _bboxes.dim_size(0);
             vector<bbox_t> super_boxes;
