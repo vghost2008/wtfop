@@ -950,7 +950,7 @@ class MachWordsOp: public OpKernel {
                     if((it != v.begin()) && (!good_split_point(*prev(it),*it)))
                         continue;
 
-                    if((eit != pend) && (!good_split_point(*eit,*next(eit))))
+                    if((eit != pend) && (!good_split_point(*prev(eit),*eit)))
                         continue;
                 }
                 res.push_back(vector<int>(it,eit));
@@ -965,6 +965,8 @@ class MachWordsOp: public OpKernel {
                 if((v>=27) &&(v<53)) return 2;
                 return v;
             };
+            if((kSpaceType==lhv) || (rhv==kSpaceType))
+                return true;
             return get_char_type(lhv) != get_char_type(rhv);
         }
 
@@ -1042,6 +1044,7 @@ class MachWordsOp: public OpKernel {
         vector<vector<int>> target_type_data_;
         string              raw_text_data_;
         vector<int>         trans_indexs_;
+        static constexpr auto kSpaceType = 69;
 };
 REGISTER_KERNEL_BUILDER(Name("MachWords").Device(DEVICE_CPU).TypeConstraint<int>("T"), MachWordsOp<CPUDevice, int>);
 
@@ -1069,6 +1072,28 @@ class SimpleMergeCharacterOp: public OpKernel {
     public:
 	public:
 		explicit SimpleMergeCharacterOp(OpKernelConstruction* context) : OpKernel(context) {
+            auto index = 1;
+            for(auto i=0; i<26; ++i) {
+                text_dict_[char('a'+i)] = index++;
+            }
+            for(auto i=0; i<26; ++i) {
+                text_dict_[char('A'+i)] = index++;
+            }
+            for(auto i=0; i<10; ++i) {
+                text_dict_[char('0'+i)] = index++;
+            }
+            map<char,char> trans={{'o','0'},{'O','0'},{'l',1}};
+            for(auto it=trans.begin(); it!=trans.end(); ++it) {
+                auto i0 = text_dict_[it->first];
+                auto i1 = text_dict_[it->second];
+                alphabet_to_digit_dict_[i0] = i1;
+            }
+            map<char,char> trans1 ={{'o','0'},{'l',1}};
+            for(auto it=trans1.begin(); it!=trans1.end(); ++it) {
+                auto i0 = text_dict_[it->first];
+                auto i1 = text_dict_[it->second];
+                digit_to_alphabet_dict_[i1] = i0;
+            }
 		}
 
 		void Compute(OpKernelContext* context) override
@@ -1100,6 +1125,7 @@ class SimpleMergeCharacterOp: public OpKernel {
             };
             auto insert_word = [&,this](){
                     strip();
+                    correct_word(cur_char);
                     res.insert(res.end(),cur_char.begin(),cur_char.end());
                     char_index.insert(char_index.end(),cur_index.begin(),cur_index.end());
                     cur_char.clear();
@@ -1132,7 +1158,74 @@ class SimpleMergeCharacterOp: public OpKernel {
                 index_data[i] = char_index[i];
             }
         }
+    /*
+     * 用于校正一个词里的字符
+     * 比如一串数字中有一个字母o, 那么这个字母可能应该是数字0
+     * 目前处理的字符主要包括0,o,1,l
+     */
+    void correct_word(vector<int>& chars) {
+        constexpr auto kMinProcessLen = 5;
+
+        if(chars.size()<kMinProcessLen)
+            return;
+
+        int dig_nr = 0;
+        int alpha_nr = 0;
+
+        for_each(chars.begin(),chars.end(),[&dig_nr,&alpha_nr](int v) {
+            if(is_alphabet(v)) {
+                alpha_nr += 1;
+            } else if(is_digit(v)) {
+                dig_nr += 1;
+            }
+        });
+
+       auto max_nr = std::max(dig_nr,alpha_nr);
+       auto min_nr = std::min(dig_nr,alpha_nr);
+
+       if((max_nr<(chars.size()*0.67)) || (min_nr>1)) 
+           return;
+      if(dig_nr>alpha_nr) {
+          if((!is_digit(chars.front())) || (!is_digit(chars.back())))
+              return;
+          trans_to_digit(chars);
+      } else {
+          if((!is_alphabet(chars.front())) || (!is_alphabet(chars.back())))
+              return;
+          trans_to_alphabet(chars);
+      }
+    }
+    static inline bool is_digit(int v) {
+        return (v>=53) && (v<63);
+    }
+   static inline bool is_alphabet(int v) {
+       return (v>=1) && (v<53); 
+   }
+   void trans_to_digit(vector<int>& chars)const
+   {
+       transform(chars.begin(),chars.end(),chars.begin(),[this](int v) {
+           auto it = alphabet_to_digit_dict_.find(v);
+           if(it !=alphabet_to_digit_dict_.end()) {
+               return it->second;
+           }
+           return v;
+       });
+   }
+   void trans_to_alphabet(vector<int>& chars)const 
+   {
+       transform(chars.begin(),chars.end(),chars.begin(),[this](int v) {
+           auto it = digit_to_alphabet_dict_.find(v);
+           if(it != digit_to_alphabet_dict_.end()) {
+               return it->second;
+           }
+           return v;
+       });
+   }
+    
    private:
     const int space_type_ = 69;
+    map<char,int> text_dict_;
+    map<int,int> digit_to_alphabet_dict_;
+    map<int,int> alphabet_to_digit_dict_;
 };
 REGISTER_KERNEL_BUILDER(Name("SimpleMergeCharacter").Device(DEVICE_CPU), SimpleMergeCharacterOp<CPUDevice>);
