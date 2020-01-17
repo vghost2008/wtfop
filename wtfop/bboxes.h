@@ -288,6 +288,7 @@ class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
 						const Eigen::Tensor<T,1,Eigen::RowMajor> box       = boxes.chip(j,0);
                         /*
                          * Faster-RCNN原文认为边界框上的bounding box不仔细处理会引起很大的不会收敛的误差
+                         * 在Detectron2的实现中默认并没有区别边界情况
                          */
                         if(is_cross_boundaries(box)) continue;
 
@@ -307,14 +308,10 @@ class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
                             if(jaccard>iou_index.iou) {
                                 iou_index.iou = jaccard;
                                 iou_index.index = i;
+                                out_scores(j)  =  jaccard;
+                                out_labels(j)  =  glabel;
+                                outindex(j)    =  i;
                             }
-                            if((jaccard < pos_threshold_) 
-                                    || (jaccard<out_scores(j)) 
-                                    || is_max_score[j]) //不覆盖特殊情况
-                                continue;
-                            out_scores(j)  =  jaccard;
-                            out_labels(j)  =  glabel;
-                            outindex(j)    =  i;
                         }
 					}
 					if(max_scores<1E-8) continue;
@@ -325,12 +322,7 @@ class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
 
                     if(max_overlap_as_pos_) {
                         std::lock_guard<std::mutex> g(mtx);
-                        if((out_scores(j) <= max_scores) || (!is_max_score[j])) {
-                            out_scores(j) = max_scores;
-                            out_labels(j) = glabel;
-                            outindex(j) = i;
-                            is_max_score[j] = true;
-                        }
+                        is_max_score[j] = true;
                     }
 				} //end for
                 };
@@ -341,10 +333,17 @@ class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
 
 				for(auto j=0; j<data_nr; ++j) {
 					const auto& iou_index = iou_indexs[j];
-					if((iou_index.iou>=pos_threshold_) || (iou_index.iou<neg_threshold_) || is_max_score[j])
+					if((iou_index.iou>=pos_threshold_) || is_max_score[j]) {
 						out_remove_indices(j) = false;
-					else
+					} else if(iou_index.iou<neg_threshold_) {
+						out_remove_indices(j) = false;
+                        outindex(j) = -1;
+                        out_labels(j) = 0;
+					} else {
 						out_remove_indices(j) = true;
+                        outindex(j) = -1;
+                        out_labels(j) = 0;
+                    }
 				}
 
 				/*
