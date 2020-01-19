@@ -211,11 +211,11 @@ def center_boxes_decode(heatmaps_tl,heatmaps_br,heatmaps_c,offset_tl,offset_br,o
  * output_scores:[X], 当前anchorbox与groundtruthbox的jaccard得分，当jaccard得分高于threshold时就不为背影
  * remove_indices:[X], 当前box是否要删除（不是正样本，也不是负样本)
 '''
-def boxes_encode1(bboxes, gboxes,glabels,pos_threshold=0.7,neg_threshold=0.3,prio_scaling=[0.1,0.1,0.2,0.2]):
+def boxes_encode1(bboxes, gboxes,glabels,pos_threshold=0.7,neg_threshold=0.3,prio_scaling=[0.1,0.1,0.2,0.2],max_overlap_as_pos=False):
     if glabels.dtype != tf.int32:
         glabels= tf.cast(glabels,tf.int32)
     out = wtfop_module.boxes_encode1(bottom_boxes=bboxes,bottom_gboxes=gboxes,bottom_glabels=glabels,
-    pos_threshold=pos_threshold,neg_threshold=neg_threshold,prio_scaling=prio_scaling)
+    pos_threshold=pos_threshold,neg_threshold=neg_threshold,prio_scaling=prio_scaling,max_overlap_as_pos=max_overlap_as_pos)
     return out[0],out[1],out[2],out[3]
 def decode_boxes1(boxes,regs,prio_scaling=[0.1,0.1,0.2,0.2]):
     out = wtfop_module.decode_boxes1(bottom_boxes=boxes,bottom_regs=regs,prio_scaling=prio_scaling)
