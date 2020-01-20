@@ -3,6 +3,7 @@ import tensorflow as tf
 from tensorflow.python.framework import ops
 import os
 import numpy as np
+from collections import Iterable
 
 ops.NotDifferentiable("BoxesNms")
 ops.NotDifferentiable("EBoxesNms")
@@ -334,13 +335,13 @@ def merge_line_boxes(data,labels,bboxes,lens,threshold=0.5,dis_threshold=[0.1,0.
 
 def get_image_resize_size(size,limit,align=1):
     if isinstance(limit,int):
-        limit = [1,limit]
-    elif not isinstance(limit,list):
-        limit = list(limit)
+        limit = [0,limit]
+    if not isinstance(limit,tf.Tensor):
+        limit = tf.convert_to_tesor(limit)
     if isinstance(align,int):
         align = [align,align]
-    elif not isinstance(align,list):
-        align = list(align)
+    if not isinstance(align,tf.Tensor):
+        align = tf.convert_to_tesor(align)
     return wtfop_module.get_image_resize_size(size=size,limit=limit,align=align)
 
 @ops.RegisterGradient("RoiPooling")
