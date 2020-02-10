@@ -24,6 +24,7 @@ ops.NotDifferentiable("AnchorGenerator")
 ops.NotDifferentiable("AdjacentMatrixGenerator")
 ops.NotDifferentiable("BoxesMatchWithPred")
 ops.NotDifferentiable("SampleLabels")
+ops.NotDifferentiable("GetBoxesDeltas")
 
 module_path = os.path.realpath(__file__)
 module_dir = os.path.dirname(module_path)
@@ -191,6 +192,24 @@ def boxes_encode(bboxes, gboxes,glabels,length,pos_threshold=0.7,neg_threshold=0
     pos_threshold=pos_threshold,neg_threshold=neg_threshold,prio_scaling=prio_scaling,max_overlap_as_pos=max_overlap_as_pos)
     return out[0],out[1],out[2],out[3],out[4]
 
+def matcher(bboxes, gboxes,glabels,length,pos_threshold=0.7,neg_threshold=0.3,max_overlap_as_pos=True):
+    if glabels.dtype != tf.int32:
+        glabels= tf.cast(glabels,tf.int32)
+    if bboxes.get_shape().ndims != 3:
+        bboxes = tf.expand_dims(bboxes,axis=0)
+    out = wtfop_module.matcher(bottom_boxes=bboxes,bottom_gboxes=gboxes,bottom_glength=length,bottom_glabels=glabels,
+    pos_threshold=pos_threshold,neg_threshold=neg_threshold,max_overlap_as_pos=max_overlap_as_pos)
+    return out[0],out[1],out[2]
+
+def get_boxes_deltas(boxes, gboxes,labels,indices,scale_weights=[10,10,5,5]):
+    if labels.dtype != tf.int32:
+        labels= tf.cast(labels,tf.int32)
+    if boxes.get_shape().ndims != 3:
+        boxes = tf.expand_dims(boxes,axis=0)
+    out = wtfop_module.get_boxes_deltas(boxes=boxes,gboxes=gboxes,labels=labels,indices=indices,
+    scale_weights=scale_weights)
+    return out
+
 def center_boxes_encode(gbboxes, glabels,glength,output_size,num_classes=2,max_box_nr=32,gaussian_iou=0.7):
     if glabels.dtype != tf.int32:
         glabels= tf.cast(glabels,tf.int32)
@@ -273,7 +292,7 @@ def anchor_generator(shape,size,scales,aspect_ratios):
     if isinstance(aspect_ratios,np.ndarray):
         aspect_ratios= aspect_ratios.tolist()
     if not isinstance(size,tf.Tensor):
-        size = tf.convert_to_tesor(size)
+        size = tf.convert_to_tensor(size)
     if size.dtype != tf.float32:
         size = tf.cast(size,tf.float32)
     res = wtfop_module.anchor_generator(shape=shape,size=size,scales=scales,aspect_ratios=aspect_ratios)

@@ -9,6 +9,7 @@ _Pragma("once")
 #include <future>
 #include <list>
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+#include "wmacros.h"
 /*
  * box:(ymin,xmin,ymax,xmax)
  */
@@ -243,10 +244,12 @@ class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
              ,max_overlap_as_pos_(max_overlap_as_pos){
 				 assert(prio_scaling_.size() == 4);
 			 }
+#ifdef PROCESS_BOUNDARY_ANCHORS
         template<typename _T>
         inline bool is_cross_boundaries(const _T& box) {
             return (box(0)<0.0) || (box(1)<0.0) || (box(2)>1.0) ||(box(3)>1.0);
         }
+#endif
 		   auto operator()(
 		   const Eigen::Tensor<T,2,Eigen::RowMajor>& boxes,
 		   const Eigen::Tensor<T,2,Eigen::RowMajor>& gboxes,
@@ -286,11 +289,13 @@ class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
 					 */
 					for(auto j=0; j<data_nr; ++j) {
 						const Eigen::Tensor<T,1,Eigen::RowMajor> box       = boxes.chip(j,0);
+#ifdef PROCESS_BOUNDARY_ANCHORS
                         /*
                          * Faster-RCNN原文认为边界框上的bounding box不仔细处理会引起很大的不会收敛的误差
                          * 在Detectron2的实现中默认并没有区别边界情况
                          */
                         if(is_cross_boundaries(box)) continue;
+#endif
 
 						auto        jaccard   = bboxes_jaccardv1(gbox,box);
 

@@ -26,7 +26,122 @@ using namespace std;
 
 typedef Eigen::ThreadPoolDevice CPUDevice;
 typedef Eigen::GpuDevice GPUDevice;
+/*
+ * scale_weights:[4](基意义与BoxesEncode的prio_scaling互为倒数
+ * boxes:[1,X,4]/[batch_size,X,4](ymin,xmin,ymax,xmax) 候选box,相对坐标
+ * gboxes:[batch_size,Y,4](ymin,xmin,ymax,xmax)ground truth box相对坐标
+ * labels:[batch_size,X] 0为背景,-1表示忽略
+ * indices:[batch_size,X] 与box相对应的gtbox索引
+ * output_boxes:[batch_size,X,4] regs(cy,cx,h,w)
+ */
+REGISTER_OP("GetBoxesDeltas")
+    .Attr("T: {float,double,int32,int64}")
+ 	.Attr("scale_weights: list(float)")
+    .Input("boxes: T")
+    .Input("gboxes: T")
+    .Input("labels: int32")
+    .Input("indices: int32")
+	.Output("output_boxes:T")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+			const auto batch_size = c->Dim(c->input(1),0);
+			const auto box_nr = c->Dim(c->input(0),1);
+			const auto box_dim = c->Dim(c->input(0),2);
+            auto shape0 = c->MakeShape({batch_size,box_nr,box_dim});
 
+			c->set_output(0, shape0);
+			return Status::OK();
+			});
+
+template <typename Device, typename T>
+class GetBoxesDeltasOp: public OpKernel {
+	public:
+		using tensor_2d = Eigen::Tensor<T,2,Eigen::RowMajor>;
+	public:
+		explicit GetBoxesDeltasOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("scale_weights", &scale_weights));
+			OP_REQUIRES(context, scale_weights.size() == 4, errors::InvalidArgument("scale_weights data must be shape[4]"));
+		}
+
+		void Compute(OpKernelContext* context) override
+		{
+			const Tensor &_bottom_boxes   = context->input(0);
+			const Tensor &_bottom_gboxes  = context->input(1);
+			const Tensor &_bottom_labels  = context->input(2);
+			const Tensor &_bottom_indices = context->input(3);
+			auto          bottom_boxes    = _bottom_boxes.template tensor<T,3>();
+			auto          bottom_gboxes   = _bottom_gboxes.template tensor<T,3>();
+			auto          bottom_labels   = _bottom_labels.template tensor<int,2>();
+			auto          bottom_indices  = _bottom_indices.template tensor<int,2>();
+			const auto    batch_size      = _bottom_gboxes.dim_size(0);
+			const auto    data_nr         = _bottom_boxes.dim_size(1);
+
+			OP_REQUIRES(context, _bottom_boxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
+			OP_REQUIRES(context, _bottom_gboxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
+			OP_REQUIRES(context, _bottom_labels.dims() == 2, errors::InvalidArgument("labels data must be 2-dimensional"));
+			OP_REQUIRES(context, _bottom_indices.dims() == 2, errors::InvalidArgument("index data must be 1-dimensional"));
+
+			int dims_3d[] = {batch_size,data_nr,_bottom_boxes.dim_size(2)};
+			TensorShape   outshape0 = _bottom_boxes.shape();
+			Tensor       *output_boxes          = NULL;
+
+			TensorShapeUtils::MakeShape(dims_3d, 3, &outshape0);
+			OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_boxes));
+
+			auto output_boxes_tensor          =  output_boxes->template tensor<T,3>();
+
+			output_boxes_tensor.setZero();
+
+            auto shard = [&](int64 start,int64 limit){
+				for(auto i=start; i<limit; ++i) {
+
+					auto boxes   = tensor_2d(bottom_boxes.chip(bottom_boxes.dimension(0)==batch_size?i:0,0));
+					auto gboxes  = tensor_2d(bottom_gboxes.chip(i,0));
+					/*
+					 * 计算所有正样本gbox到所对应的box的回归参数
+					 */
+					for(auto j=0; j<data_nr; ++j) {
+						if((bottom_labels(i,j)<1)) {
+							continue;
+						}
+						Eigen::Tensor<T,1,Eigen::RowMajor> box     = boxes.chip(j,0);
+						Eigen::Tensor<T,1,Eigen::RowMajor> gbox    = gboxes.chip(bottom_indices(i,j),0);
+						auto  yxhw    = box_minmax_to_cxywh(box.data());
+						auto  yref    = std::get<0>(yxhw);
+						auto  xref    = std::get<1>(yxhw);
+						auto  href    = std::get<2>(yxhw);
+						auto  wref    = std::get<3>(yxhw);
+
+						if((href<1E-8) || (wref<1E-8)) {
+							continue;
+						}
+
+						auto gyxhw = box_minmax_to_cxywh(gbox.data());
+						auto gcy =  std::get<0>(gyxhw);
+						auto gcx =  std::get<1>(gyxhw);
+						auto gh  =  std::get<2>(gyxhw);
+						auto gw  =  std::get<3>(gyxhw);
+						auto feat_cy  =  scale_weights[0]*(gcy-yref)/href;
+						auto feat_cx  =  scale_weights[1]*(gcx-xref)/wref;
+						auto feat_h   =  log(gh/href)*scale_weights[2];
+						auto feat_w   =  log(gw/wref)*scale_weights[3];
+
+						output_boxes_tensor(i,j,0) = feat_cy;
+						output_boxes_tensor(i,j,1) = feat_cx;
+						output_boxes_tensor(i,j,2) = feat_h;
+						output_boxes_tensor(i,j,3) = feat_w;
+					}
+				}
+            };
+            list<future<void>> results;
+            for(auto i=0; i<batch_size; ++i) {
+                results.emplace_back(async(launch::async,[i,&shard](){ shard(i,i+1);}));
+            }
+        }
+	private:
+		vector<float> scale_weights;
+};
+REGISTER_KERNEL_BUILDER(Name("GetBoxesDeltas").Device(DEVICE_CPU).TypeConstraint<float>("T"), GetBoxesDeltasOp<CPUDevice, float>);
+///////////
 /*
  * prio_scaling:[4]
  * max_overlap_as_pos:是否将与ground truth bbox交叉面积最大的box设置为正样本
