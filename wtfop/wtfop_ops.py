@@ -153,10 +153,10 @@ def distored_qa(question,answer,expand_nr=2):
 def expand_tensor(tensor,expand_nr=2):
     out = wtfop_module.expand_tensor(tensor,expand_nr=expand_nr)
     return out
-def boxes_nms(bboxes, classes, threshold=0.45,confidence=None,classes_wise=True):
+def boxes_nms(bboxes, classes, threshold=0.45,confidence=None,classes_wise=True,k=-1):
     if classes.dtype != tf.int32:
         classes = tf.cast(classes,tf.int32)
-    out = wtfop_module.boxes_nms(bottom_box=bboxes,classes=classes,threshold=threshold,classes_wise=classes_wise)
+    out = wtfop_module.boxes_nms(bottom_box=bboxes,classes=classes,threshold=threshold,classes_wise=classes_wise,k=-1)
     return out[0],out[1],tf.cast(out[2],tf.int32)
 
 def no_overlap_boxes_nms(bboxes, classes, threshold0=0.2,threshold1=0.8,confidence=None,classes_wise=True):

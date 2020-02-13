@@ -23,6 +23,7 @@ using namespace std;
 typedef Eigen::ThreadPoolDevice CPUDevice;
 /*
  * 要求数据已经按重要呈度从0到data_nr排好了序(从大到小）
+ * k:结果最多只包含k个
  * bottom_box:[X,4](ymin,xmin,ymax,xmax)
  * classes:[X]
  * output_box:[Y,4]
@@ -34,6 +35,7 @@ REGISTER_OP("BoxesNms")
     .Attr("T: {float, double,int32}")
 	.Attr("threshold:float")
 	.Attr("classes_wise:bool")
+	.Attr("k:int")
     .Input("bottom_box: T")
     .Input("classes: int32")
 	.Output("output_box:T")
@@ -51,6 +53,7 @@ class BoxesNmsOp: public OpKernel {
 	public:
 		explicit BoxesNmsOp(OpKernelConstruction* context) : OpKernel(context) {
 			OP_REQUIRES_OK(context, context->GetAttr("threshold", &threshold));
+			OP_REQUIRES_OK(context, context->GetAttr("k", &k_));
 			OP_REQUIRES_OK(context, context->GetAttr("classes_wise", &classes_wise));
 		}
 
@@ -80,7 +83,8 @@ class BoxesNmsOp: public OpKernel {
 				}
 			}
 
-			const auto out_size = count(keep_mask.begin(),keep_mask.end(),true);
+			const auto _out_size = count(keep_mask.begin(),keep_mask.end(),true);
+			const auto out_size = k_>0?std::min<int>(k_,_out_size):_out_size;
 			int dims_2d[2] = {int(out_size),4};
 			int dims_1d[1] = {int(out_size)};
 			TensorShape  outshape0;
@@ -107,11 +111,14 @@ class BoxesNmsOp: public OpKernel {
 				oclasses(j) = bottom_classes_flat(i);
 				oindex(j) = i;
 				++j;
+				if(j>=out_size)
+					break;
 			}
 		}
 	private:
 		float threshold    = 0.2;
 		bool  classes_wise = true;
+		int   k_           = -1;
 };
 REGISTER_KERNEL_BUILDER(Name("BoxesNms").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesNmsOp<CPUDevice, float>);
 /*
