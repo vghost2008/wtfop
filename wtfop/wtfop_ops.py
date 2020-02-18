@@ -356,11 +356,11 @@ def get_image_resize_size(size,limit,align=1):
     if isinstance(limit,int):
         limit = [0,limit]
     if not isinstance(limit,tf.Tensor):
-        limit = tf.convert_to_tesor(limit)
+        limit = tf.convert_to_tensor(limit)
     if isinstance(align,int):
         align = [align,align]
     if not isinstance(align,tf.Tensor):
-        align = tf.convert_to_tesor(align)
+        align = tf.convert_to_tensor(align)
     return wtfop_module.get_image_resize_size(size=size,limit=limit,align=align)
 
 @ops.RegisterGradient("RoiPooling")
