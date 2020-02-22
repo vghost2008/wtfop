@@ -235,6 +235,7 @@ class IntHash: public OpKernel {
 		map<int,int> dict_;
 };
 REGISTER_KERNEL_BUILDER(Name("IntHash").Device(DEVICE_CPU).TypeConstraint<int>("T"), IntHash<CPUDevice, int>);
+REGISTER_KERNEL_BUILDER(Name("IntHash").Device(DEVICE_CPU).TypeConstraint<tensorflow::int64>("T"), IntHash<CPUDevice, tensorflow::int64>);
 /*
  * 对Boxes的概率进行调整
  * 具体方法为：
