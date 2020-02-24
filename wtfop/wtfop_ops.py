@@ -98,17 +98,6 @@ def boxes_nms_nr(bboxes, classes, confidence=None,k=128,max_loop=5,classes_wise=
     out = wtfop_module.boxes_nms_nr(bottom_box=bboxes,classes=classes,k=k,max_loop=max_loop,classes_wise=classes_wise)
     return out[0],out[1],tf.cast(out[2],tf.int32)
 
-def merge_character(bboxes, labels,dlabels, expand=0.01,super_box_type=68,space_type=69):
-    out = wtfop_module.merge_character(bboxes=bboxes,labels=labels,dlabels=dlabels,expand=expand,super_box_type=super_box_type,space_type=space_type)
-    return out
-def simple_merge_character(labels,windex):
-    out = wtfop_module.simple_merge_character(labels=labels,windex=windex)
-    return out
-
-def mach_words(targets, texts):
-    out = wtfop_module.mach_words(targets=targets,texts=texts)
-    return out
-
 @ops.RegisterGradient("BoxesNmsNr")
 def _boxes_nms_nr_grad(op, grad, _,_0):
   return [None,None]
