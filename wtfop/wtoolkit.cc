@@ -7,6 +7,7 @@
 #include <iostream>
 #include <algorithm>
 #include <future>
+#include <assert.h>
 #include <boost/algorithm/clamp.hpp>
 #include "tensorflow/core/framework/common_shape_fns.h"
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
@@ -310,13 +311,16 @@ REGISTER_KERNEL_BUILDER(Name("ProbabilityAdjust").Device(DEVICE_CPU).TypeConstra
 /*
  * labels:[batch_size,nr]
  * ids:[batch_size,nr]
- * output:[batch_size,sample_nr,3]
+ * lens:[batch_size] avaiable labels's length
+ *return: 
+ * output:[batch_size,sample_nr,3] (id0,id1_pos,id2_neg) 内容为相应的索引
  */
 REGISTER_OP("SampleLabels")
     .Attr("T: {int32, int64}")
 	.Attr("sample_nr:int")
     .Input("labels: T")
     .Input("ids: T")
+    .Input("lens: T")
 	.Output("data:T")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
             int sample_nr = 0;
@@ -338,27 +342,35 @@ class SampleLabelsOp: public OpKernel {
         {
             const Tensor &_labels     =  context->input(0);
             const Tensor &_ids        =  context->input(1);
+            const Tensor &_lens       =  context->input(2);
             auto          labels      =  _labels.tensor<T,2>();
             auto          ids         =  _ids.tensor<T,2>();
+            auto          lens        =  _lens.tensor<T,1>();
             auto          batch_size  =  labels.dimension(0);
 
             OP_REQUIRES(context, _labels.dims() == 2, errors::InvalidArgument("labels must be 2-dimensional"));
             OP_REQUIRES(context, _ids.dims() == 2, errors::InvalidArgument("ids must be 2-dimensional"));
+            OP_REQUIRES(context, _lens.dims() == 2, errors::InvalidArgument("lens must be 1-dimensional"));
 
 
             int dims_3d[] = {batch_size,sample_nr_,3};
             TensorShape outshape0;
+            Tensor *output_data = NULL;
 
             TensorShapeUtils::MakeShape(dims_3d, 3, &outshape0);
-            Tensor *output_data = NULL;
+
             OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_data));
+
             auto out_tensor = output_data->tensor<T,3>();
             list<future<vector<tuple<T,T,T>>>> res;
+
             for(auto i=0; i<batch_size; ++i) {
                 res.emplace_back(async(launch::async,&SampleLabelsOp<Device,T>::sample_one_batch,Eigen::Tensor<T,1,Eigen::RowMajor>(ids.chip(i,0)),
                 Eigen::Tensor<T,1,Eigen::RowMajor>(labels.chip(i,0)),
+                lens(i),
                 sample_nr_));
             }
+
             for(auto i=0; i<batch_size; ++i) {
                 auto data = next(res.begin(),i)->get();
                 for(auto j=0; j<sample_nr_; ++j) {
@@ -368,104 +380,79 @@ class SampleLabelsOp: public OpKernel {
                 }
             }
         }
-        static vector<tuple<T,T,T>> sample_one_batch(const Eigen::Tensor<T,1,Eigen::RowMajor>& ids,const Eigen::Tensor<T,1,Eigen::RowMajor>& labels,int sample_nr) {
+        static vector<tuple<T,T,T>> sample_one_batch(const Eigen::Tensor<T,1,Eigen::RowMajor>& ids,const Eigen::Tensor<T,1,Eigen::RowMajor>& labels,int data_nr,int sample_nr) {
             map<T,vector<int>> datas;
-            map<T,T> id_to_label;
-            const auto data_nr = ids.dimension(0);
-            for(auto i=0; i<ids.dimension(0); ++i) {
-                const auto id = ids(i);
-                if(id == 0) continue;
+
+            assert(ids.dimension(0)>=data_nr);
+            assert(ids.dimension(0)>0);
+
+            for(auto i=0; i<data_nr; ++i) {
+                auto id = ids(i);
                 auto it = datas.find(id);
-                if(it != datas.end()) {
-                    it->second.push_back(i);
-                } else {
+                if(it == datas.end()) {
                     datas[id] = vector<int>({i});
-                    id_to_label[id] = labels[i];
+                } else {
+                    it->second.push_back(i);
                 }
             }
-            if(datas.size() == 0) {
-                vector<tuple<T,T,T>> res(sample_nr,make_tuple(0,0,1));
-                return res;
-            } else if(datas.size() ==1){
-                vector<tuple<T,T,T>> res(sample_nr);
-                std::random_device rd;
-                std::mt19937 gen(rd());
-                std::uniform_int_distribution<> dis(0, datas.begin()->second.size()-1);
-                std::uniform_int_distribution<> dis1(0, data_nr-1);
-                const auto& data = datas.begin()->second;
-                auto o_r = minmax_element(data.begin(),data.end());
-                auto o_v = 0;
-                if((*o_r.first)>0)
-                    o_v = 0;
-                else if(*o_r.second+1<data_nr)
-                    o_v=*o_r.second+1;
-                else
-                    o_v = dis1(gen);
-                generate(res.begin(),res.end(),[&gen,&dis,o_v,&data](){
-                        int index0;
-                        int index1;
-                        std::tie(index0,index1) = sample_two_int(dis.b(),[&dis,&gen]{ return dis(gen);});
-                        const auto v0 = data[index0];
-                        const auto v1 = data[index1];
-                        return make_tuple(v0,v1,o_v);
-                        });
+            /*
+             * 用于简化采样时的操作
+             */
+            for(auto it=datas.begin(); it!=datas.end(); ++it) {
+                if(it->second.size()==1) {
+                    it->second.push_back(it->second[0]);
+                }
+            }
+
+            if(datas.size() == 1) {
+                vector<tuple<T,T,T>> res(sample_nr,make_tuple(0,0,data_nr-1));
+                cout<<"Too few samples in sample_one_batch."<<endl;
                 return res;
             } else {
                 vector<tuple<T,T,T>> res(sample_nr);
                 std::random_device rd;
                 std::mt19937 gen(rd());
-                std::uniform_int_distribution<> dis(0, datas.size()-1);
-                std::uniform_int_distribution<> dis1;
-                generate(res.begin(),res.end(),[&gen,&dis,&dis1,&datas,&id_to_label](){
-                        int        index0  = dis(gen);
-                        int        index1;
-                        int        index00;
-                        int        index01;
-                        const auto id0     = next(datas.begin(),index0)->first;
-                        const auto label0  = id_to_label[id0];
-                        vector<int> id1s;
+                std::uniform_int_distribution<> dis(0, data_nr);
+                const auto kDelta = 3;
 
-                        for(auto& item:id_to_label) {
-                            if((item.first != id0) && (item.second == label0)) {
-                                id1s.push_back(item.first);
-                            }
-                        }
-                        if(!id1s.empty()) {
-                            const auto id1 = id1s[dis1(gen)%id1s.size()];
-                            index1 = distance(datas.begin(),datas.find(id1));
-                        } else {
-                            index1 = dis(gen);
-                            if(index1 == index0) {
-                                if(index1>0)
-                                    index1 = 0;
-                                else
-                                    index1 = 1;
-                            }
+                generate(res.begin(),res.end(),[&gen,&dis,&datas](){
+                        const auto id_index0 = dis(gen)%datas.size();
+                        auto id_index1 = dis(gen)%datas.size();
+
+                        if(id_index1 == id_index0) {
+                            if(id_index0>0)
+                                id_index1 = 0;
+                            else
+                                id_index1 = 1;
                         }
 
-                        const auto& data0 = next(datas.begin(),index0)->second;
-                        const auto& data1 = next(datas.begin(),index1)->second;
-
-                        std::tie(index00,index01) = sample_two_int(data0.size()-1,[&dis1,&gen,&data0]{ return dis1(gen)%data0.size();});
-
-                        const auto index10 = dis1(gen)%data1.size();
-                        const auto v0 = data0[index00];
-                        const auto v1 = data0[index01];
-                        const auto v2 = data1[index10];
+                        auto it0 = next(datas.begin(),id_index0);
+                        auto it1 = next(datas.begin(),id_index1);
+                        int id0_idx0;
+                        int id0_idx1;
+                        std::tie(id0_idx0,id0_idx1) = sample_two_int(it0->second.size(),kDelta,[&dis,&gen]{return dis(gen);});
+                        auto id1_idx = dis(gen)%it1->second.size();
+                        auto v0 = it0->second[id0_idx0];
+                        auto v1 = it0->second[id0_idx1];
+                        auto v2 = it1->second[id1_idx];
                         return make_tuple(v0,v1,v2);
                         });
                 return res;
-            }
+            } 
         }
-        static pair<int,int> sample_two_int(int max_val,auto func) {
-            const int v0 = func();
-            int v1 = func();
-            if((0 == max_val) || (v0 != v1))
+        static pair<int,int> sample_two_int(int max_val,int delta,auto func) {
+            const int v0 = func()%max_val;
+            if(max_val<=delta) {  
+                const int v1 = func()%max_val;
                 return make_pair(v0,v1);
-            if(v1>0)
-                return make_pair(v0,v1-1);
-            else
-                return make_pair(v0,1);
+            }
+            auto d_v1 = func()%delta;
+            if(v0<delta) {
+                auto v1 = min(v0+d_v1,max_val-1);
+                return make_pair(v0,v1);
+            } else {
+                return make_pair(v0,v0-d_v1);
+            }
         };
     private:
         int sample_nr_ = 0;
