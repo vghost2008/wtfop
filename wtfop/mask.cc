@@ -30,6 +30,7 @@ typedef Eigen::ThreadPoolDevice CPUDevice;
  * output_bboxes:[batch_size,nr,4] (ymin,xmin,ymax,xmax)
  * output_labels:[batch_size,nr]
  * output_lens:[batch_size]
+ * output_ids:[batch_size,nr] 用于表示实例的编号，如第一个batch中的第二个实例所生成的所有的box的ids为3(id的编号从1开始)
  */
 REGISTER_OP("MaskLineBboxes")
     .Attr("T: {int64,int32}")
