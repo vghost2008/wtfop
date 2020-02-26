@@ -388,6 +388,7 @@ class SampleLabelsOp: public OpKernel {
 
             for(auto i=0; i<data_nr; ++i) {
                 auto id = ids(i);
+                if(id<1)continue;
                 auto it = datas.find(id);
                 if(it == datas.end()) {
                     datas[id] = vector<int>({i});
