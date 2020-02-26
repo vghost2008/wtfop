@@ -320,7 +320,6 @@ REGISTER_OP("SampleLabels")
 	.Attr("sample_nr:int")
     .Input("labels: T")
     .Input("ids: T")
-    .Input("lens: T")
 	.Output("data:T")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
             int sample_nr = 0;
@@ -342,15 +341,12 @@ class SampleLabelsOp: public OpKernel {
         {
             const Tensor &_labels     =  context->input(0);
             const Tensor &_ids        =  context->input(1);
-            const Tensor &_lens       =  context->input(2);
             auto          labels      =  _labels.tensor<T,2>();
             auto          ids         =  _ids.tensor<T,2>();
-            auto          lens        =  _lens.tensor<T,1>();
             auto          batch_size  =  labels.dimension(0);
 
             OP_REQUIRES(context, _labels.dims() == 2, errors::InvalidArgument("labels must be 2-dimensional"));
             OP_REQUIRES(context, _ids.dims() == 2, errors::InvalidArgument("ids must be 2-dimensional"));
-            OP_REQUIRES(context, _lens.dims() == 2, errors::InvalidArgument("lens must be 1-dimensional"));
 
 
             int dims_3d[] = {batch_size,sample_nr_,3};
@@ -367,7 +363,6 @@ class SampleLabelsOp: public OpKernel {
             for(auto i=0; i<batch_size; ++i) {
                 res.emplace_back(async(launch::async,&SampleLabelsOp<Device,T>::sample_one_batch,Eigen::Tensor<T,1,Eigen::RowMajor>(ids.chip(i,0)),
                 Eigen::Tensor<T,1,Eigen::RowMajor>(labels.chip(i,0)),
-                lens(i),
                 sample_nr_));
             }
 
@@ -380,15 +375,15 @@ class SampleLabelsOp: public OpKernel {
                 }
             }
         }
-        static vector<tuple<T,T,T>> sample_one_batch(const Eigen::Tensor<T,1,Eigen::RowMajor>& ids,const Eigen::Tensor<T,1,Eigen::RowMajor>& labels,int data_nr,int sample_nr) {
+        static vector<tuple<T,T,T>> sample_one_batch(const Eigen::Tensor<T,1,Eigen::RowMajor>& ids,const Eigen::Tensor<T,1,Eigen::RowMajor>& labels,int sample_nr) {
             map<T,vector<int>> datas;
 
-            assert(ids.dimension(0)>=data_nr);
             assert(ids.dimension(0)>0);
+            const auto data_nr = ids.dimension(0);
 
             for(auto i=0; i<data_nr; ++i) {
                 auto id = ids(i);
-                if(id<1)continue;
+                if((id<1) || (labels(i)<1))continue;
                 auto it = datas.find(id);
                 if(it == datas.end()) {
                     datas[id] = vector<int>({i});
