@@ -337,11 +337,11 @@ def mask_line_bboxes(mask,labels,lens,max_output_nr=-1):
         mask = tf.cast(mask,tf.uint8)
     return wtfop_module.mask_line_bboxes(mask=mask,labels=labels,lens=lens,max_output_nr=max_output_nr)
 
-def sample_labels(labels,ids,sample_nr=1024):
-    return wtfop_module.sample_labels(labels=labels,ids=ids,sample_nr=sample_nr)
+def sample_labels(labels,ids,line_no,sample_nr=1024):
+    return wtfop_module.sample_labels(labels=labels,ids=ids,line_no=line_no,sample_nr=sample_nr)
 
-def merge_line_boxes(data,labels,bboxes,lens,threshold=0.5,dis_threshold=[0.1,0.1]):
-    return wtfop_module.merge_line_boxes(data=data,labels=labels,bboxes=bboxes,lens=lens,threshold=threshold,dis_threshold=dis_threshold)
+def merge_line_boxes(data,labels,bboxes,threshold=0.5,dis_threshold=[0.1,0.1]):
+    return wtfop_module.merge_line_boxes(data=data,labels=labels,bboxes=bboxes,threshold=threshold,dis_threshold=dis_threshold)
 
 def get_image_resize_size(size,limit,align=1):
     if isinstance(limit,int):
@@ -372,3 +372,6 @@ def median_blur(image,ksize=5):
 
 def bilateral_filter(image,d=5,sigmaColor=5,sigmaSpace=4):
     return wtfop_module.bilateral_filter(image=image,d=d,sigmaColor=sigmaColor,sigmaSpace=sigmaSpace)
+
+def fill_bboxes(image,bboxes,v=1.0):
+    return wtfop_module.fill_b_boxes(image=image,bboxes=bboxes,v=v)

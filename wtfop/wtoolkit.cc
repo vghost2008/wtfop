@@ -311,7 +311,7 @@ REGISTER_KERNEL_BUILDER(Name("ProbabilityAdjust").Device(DEVICE_CPU).TypeConstra
 /*
  * labels:[batch_size,nr]
  * ids:[batch_size,nr]
- * lens:[batch_size] avaiable labels's length
+ * line_no[batch_size,nr]
  *return: 
  * output:[batch_size,sample_nr,3] (id0,id1_pos,id2_neg) 内容为相应的索引
  */
@@ -320,6 +320,7 @@ REGISTER_OP("SampleLabels")
 	.Attr("sample_nr:int")
     .Input("labels: T")
     .Input("ids: T")
+    .Input("line_no: T")
 	.Output("data:T")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
             int sample_nr = 0;
@@ -341,14 +342,17 @@ class SampleLabelsOp: public OpKernel {
         {
             const Tensor &_labels     =  context->input(0);
             const Tensor &_ids        =  context->input(1);
-            auto          labels      =  _labels.tensor<T,2>();
-            auto          ids         =  _ids.tensor<T,2>();
-            auto          batch_size  =  labels.dimension(0);
+            const Tensor &_line_no    =  context->input(2);
 
             OP_REQUIRES(context, _labels.dims() == 2, errors::InvalidArgument("labels must be 2-dimensional"));
+            OP_REQUIRES(context, _line_no.dims() == 2, errors::InvalidArgument("line no must be 2-dimensional"));
             OP_REQUIRES(context, _ids.dims() == 2, errors::InvalidArgument("ids must be 2-dimensional"));
 
 
+            auto          labels      =  _labels.tensor<T,2>();
+            auto          ids         =  _ids.tensor<T,2>();
+            auto          line_no     =  _line_no.tensor<T,2>();
+            auto          batch_size  =  labels.dimension(0);
             int dims_3d[] = {batch_size,sample_nr_,3};
             TensorShape outshape0;
             Tensor *output_data = NULL;
@@ -363,6 +367,7 @@ class SampleLabelsOp: public OpKernel {
             for(auto i=0; i<batch_size; ++i) {
                 res.emplace_back(async(launch::async,&SampleLabelsOp<Device,T>::sample_one_batch,Eigen::Tensor<T,1,Eigen::RowMajor>(ids.chip(i,0)),
                 Eigen::Tensor<T,1,Eigen::RowMajor>(labels.chip(i,0)),
+                line_no.chip(i,0),
                 sample_nr_));
             }
 
@@ -375,20 +380,39 @@ class SampleLabelsOp: public OpKernel {
                 }
             }
         }
-        static vector<tuple<T,T,T>> sample_one_batch(const Eigen::Tensor<T,1,Eigen::RowMajor>& ids,const Eigen::Tensor<T,1,Eigen::RowMajor>& labels,int sample_nr) {
+        static vector<tuple<T,T,T>> sample_one_batch(const Eigen::Tensor<T,1,Eigen::RowMajor>& ids,
+        const Eigen::Tensor<T,1,Eigen::RowMajor>& labels,
+        const Eigen::Tensor<T,1,Eigen::RowMajor>& line_no,
+        int sample_nr) {
+            //instance id->box index
             map<T,vector<int>> datas;
+            map<T,int> id_to_label;
+            map<int,vector<T>> label_to_id;
+           const auto kDelta = 3;
 
             assert(ids.dimension(0)>0);
             const auto data_nr = ids.dimension(0);
+            auto default_neg = data_nr-1;
 
             for(auto i=0; i<data_nr; ++i) {
                 auto id = ids(i);
-                if((id<1) || (labels(i)<1))continue;
+                if((id<1) || (labels(i)<1)) continue;
                 auto it = datas.find(id);
                 if(it == datas.end()) {
                     datas[id] = vector<int>({i});
                 } else {
                     it->second.push_back(i);
+                }
+                const auto l = labels[i];
+                id_to_label[id] = l;
+            }
+            for(auto it=id_to_label.begin(); it!=id_to_label.end(); ++it) {
+                const auto id = it->first;
+                const auto l = it->second;
+                if(label_to_id.find(l) == label_to_id.end()) {
+                    label_to_id[l] = vector<T>({id});
+                } else {
+                    label_to_id[l].push_back(id);
                 }
             }
             /*
@@ -400,56 +424,118 @@ class SampleLabelsOp: public OpKernel {
                 }
             }
 
+            std::random_device rd;
+            std::mt19937 gen(rd());
+            std::uniform_int_distribution<> dis(0, data_nr);
+
             if(datas.size() == 1) {
-                vector<tuple<T,T,T>> res(sample_nr,make_tuple(0,0,data_nr-1));
-                cout<<"Too few samples in sample_one_batch."<<endl;
+                auto it0 = datas.begin();
+                auto ids = datas.begin()->second;
+                int v0;
+                int v1;
+                std::tie(v0,v1) = sample_two_pos_int(ids,kDelta,line_no,[&dis,&gen]{return dis(gen);});
+                auto neg_idx = (data_nr-1);
+                if(find(ids.begin(),ids.end(),neg_idx) != ids.end()) {
+                    neg_idx = 0;
+                    if(find(ids.begin(),ids.end(),neg_idx) != ids.end()) {
+                        cout<<"No neg idx find in sample_one_batch."<<endl;
+                    }
+                }
+                vector<tuple<T,T,T>> res(sample_nr,make_tuple(v0,v1,neg_idx));
                 return res;
             } else {
+                /*
+                 * 至少有两个以上的目标
+                 */
                 vector<tuple<T,T,T>> res(sample_nr);
-                std::random_device rd;
-                std::mt19937 gen(rd());
-                std::uniform_int_distribution<> dis(0, data_nr);
-                const auto kDelta = 3;
 
-                generate(res.begin(),res.end(),[&gen,&dis,&datas](){
+                generate(res.begin(),res.end(),[&gen,&dis,&datas,&label_to_id,&id_to_label,&line_no](){
                         const auto id_index0 = dis(gen)%datas.size();
-                        auto id_index1 = dis(gen)%datas.size();
-
-                        if(id_index1 == id_index0) {
-                            if(id_index0>0)
-                                id_index1 = 0;
-                            else
-                                id_index1 = 1;
-                        }
-
+                        const auto id_index1 = sample_neg_data(datas,id_to_label,label_to_id,id_index0,[&dis,&gen]{return dis(gen);});
                         auto it0 = next(datas.begin(),id_index0);
                         auto it1 = next(datas.begin(),id_index1);
-                        int id0_idx0;
-                        int id0_idx1;
-                        std::tie(id0_idx0,id0_idx1) = sample_two_int(it0->second.size(),kDelta,[&dis,&gen]{return dis(gen);});
+                        int v0;
+                        int v1;
+                        std::tie(v0,v1) = sample_two_pos_int(it0->second,kDelta,line_no,[&dis,&gen]{return dis(gen);});
                         auto id1_idx = dis(gen)%it1->second.size();
-                        auto v0 = it0->second[id0_idx0];
-                        auto v1 = it0->second[id0_idx1];
                         auto v2 = it1->second[id1_idx];
                         return make_tuple(v0,v1,v2);
                         });
                 return res;
             } 
         }
+        template<typename RFunc>
+        static int sample_neg_data(const map<T,vector<int>>& id_to_index,const map<T,int>& id_to_label,const map<int,vector<T>>& label_to_id,int id_index,RFunc func) {
+            /*
+             * 尽量从具有相同label的实例中采样
+             */
+            auto id = next(id_to_index.begin(),id_index)->first;
+            const auto label = id_to_label.at(id);
+            auto ids = label_to_id.at(label);
+            if(ids.size() == 1) {
+                return sample_int_exclude(id_to_index.size(),id_index,func);
+            } else {
+                auto _index = distance(ids.begin(),find(ids.begin(),ids.end(),id));
+                auto index = sample_int_exclude(ids.size(),_index,func);
+                auto id1 = ids[index];
+                assert(id_to_label.at(id1)==label);
+                assert(id1!=id);
+                auto it = id_to_index.find(id1);
+                return distance(id_to_index.begin(),it);
+            }
+
+        }
         static pair<int,int> sample_two_int(int max_val,int delta,auto func) {
             const int v0 = func()%max_val;
             if(max_val<=delta) {  
-                const int v1 = func()%max_val;
+                const auto v1 = sample_int_exclude(max_val,v0,func);
                 return make_pair(v0,v1);
             }
-            auto d_v1 = func()%delta;
-            if(v0<delta) {
+            auto d_v1 = (func()%delta)+1;
+            if(v0<max_val-1) {
                 auto v1 = min(v0+d_v1,max_val-1);
                 return make_pair(v0,v1);
             } else {
                 return make_pair(v0,v0-d_v1);
             }
         };
+        static pair<int,int> sample_two_pos_int(const vector<int>& indexs,int delta,
+            const Eigen::Tensor<T,1,Eigen::RowMajor>& line_no,
+            auto func) {
+            /*
+             * 尽量在不同的行采样
+             */
+            const int v0 = func()%indexs.size();
+            const int index0 = indexs[v0];
+            const int line_no0 = line_no(index0);
+            vector<int> a_indexs;
+
+            a_indexs.reserve(indexs.size());
+
+            copy_if(indexs.begin(),indexs.end(),back_inserter(a_indexs),[line_no0,delta,&line_no](int v) {
+                auto line_no1 = line_no(v);
+                if(line_no1==line_no0) return false;
+                return fabs(line_no1-line_no0)<=delta;
+            });
+
+            if(a_indexs.size()==0) {
+                const auto v1 = sample_int_exclude(indexs.size(),v0,func);
+                const int index1 = indexs[v1];
+                return make_pair(index0,index1);
+            }
+
+            const auto v1 = func()%a_indexs.size();
+            const auto index1 = a_indexs[v1];
+
+            return make_pair(index0,index1);
+        };
+        template<typename RFunc>
+        static int sample_int_exclude(int max_val,int exclude_v,RFunc func)
+        {
+            assert(max_val>0);
+            auto res = func()%(max_val-1);
+            return (res==exclude_v)?res+1:res;
+        }
     private:
         int sample_nr_ = 0;
 };
@@ -457,13 +543,12 @@ REGISTER_KERNEL_BUILDER(Name("SampleLabels").Device(DEVICE_CPU).TypeConstraint<i
 REGISTER_KERNEL_BUILDER(Name("SampleLabels").Device(DEVICE_CPU).TypeConstraint<tensorflow::int64>("T"), SampleLabelsOp<CPUDevice, tensorflow::int64>);
 
 /*
- * data:[batch_size,nr,X]
- * labels:[batch_size,nr]
- * bboxes:[batch_size,nr,4]
- * lens:[batch_size]
+ * data:[nr,nr] (i,j)表示i到j的距离
+ * labels:[nr]
+ * bboxes:[nr,4]
  * threshold:
  * dis_threshold:[2](x,y)
- * output:[batch_size,nr]
+ * output:[nr]
  */
 REGISTER_OP("MergeLineBoxes")
     .Attr("T: {int32, int64}")
@@ -472,8 +557,8 @@ REGISTER_OP("MergeLineBoxes")
     .Input("data: float")
     .Input("labels: T")
     .Input("bboxes:float")
-    .Input("lens:T")
 	.Output("ids:T")
+	.Output("unique_ids:T")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
             const auto input_shape0 = c->input(1);
 			c->set_output(0, input_shape0);
@@ -493,41 +578,49 @@ class MergeLineBoxesOp: public OpKernel {
             const Tensor &_data      = context->input(0);
             const Tensor &_labels    = context->input(1);
             const Tensor &_bboxes    = context->input(2);
-            const Tensor &_lens      = context->input(3);
-            auto          data       = _data.tensor<float,3>();
-            auto          bboxes     = _bboxes.tensor<float,3>();
-            auto          labels     = _labels.tensor<T,2>();
-            auto          lens       = _lens.tensor<T,1>();
+
+            OP_REQUIRES(context, _labels.dims() == 1, errors::InvalidArgument("labels must be 1-dimensional"));
+            OP_REQUIRES(context, _data.dims() == 2, errors::InvalidArgument("data must be 2-dimensional"));
+            OP_REQUIRES(context, _bboxes.dims() == 2, errors::InvalidArgument("bboxes must be 2-dimensional"));
+
+            auto          data       = _data.tensor<float,2>();
+            auto          bboxes     = _bboxes.tensor<float,2>();
+            auto          labels     = _labels.tensor<T,1>();
             auto          batch_size = labels.dimension(0);
-
-            OP_REQUIRES(context, _labels.dims() == 2, errors::InvalidArgument("labels must be 2-dimensional"));
-            OP_REQUIRES(context, _data.dims() == 3, errors::InvalidArgument("data must be 3-dimensional"));
-            OP_REQUIRES(context, _bboxes.dims() == 3, errors::InvalidArgument("bboxes must be 3-dimensional"));
-            OP_REQUIRES(context, _lens.dims() == 1, errors::InvalidArgument("lens must be 1-dimensional"));
-
-
-            const auto data_nr = labels.dimension(1);
-            int dims_2d[] = {batch_size,data_nr};
-            TensorShape outshape0;
-
-            TensorShapeUtils::MakeShape(dims_2d, 2, &outshape0);
-            Tensor *output_data = NULL;
-            OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_data));
-            auto out_tensor = output_data->tensor<T,2>();
+            const auto     data_nr = labels.dimension(0);
             list<future<vector<int>>> res;
-            for(auto i=0; i<batch_size; ++i) {
-                res.emplace_back(async(launch::async,[this,i,&data,&labels,&bboxes,&lens]{
-                    return process_one_batch(data.chip(i,0),labels.chip(i,0),bboxes.chip(i,0),lens(i));
-                    }));
-            }
+            auto res_data = process(data,labels,bboxes,data_nr);
+            vector<int> res_data1 = res_data;
+
+            sort(res_data1.begin(),res_data1.end());
+
+            auto last = unique(res_data1.begin(),res_data1.end());
+            res_data1.erase(last,res_data1.end());
+
+            int dims_1d[] = {data_nr};
+            int dims_1d2[] = {res_data1.size()};
+            TensorShape outshape0;
+            TensorShape outshape1;
+
+            TensorShapeUtils::MakeShape(dims_1d, 1, &outshape0);
+            TensorShapeUtils::MakeShape(dims_1d2, 1, &outshape1);
+
+            Tensor *output_data = NULL;
+            Tensor *output_data1 = NULL;
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_data));
+            OP_REQUIRES_OK(context, context->allocate_output(1, outshape1, &output_data1));
+
+            auto out_tensor = output_data->tensor<T,1>();
+            auto out_tensor1 = output_data1->tensor<T,1>();
+
             out_tensor.setConstant(0);
-            for(auto i=0; i<batch_size; ++i) {
-                auto data = next(res.begin(),i)->get();
-                cout<<"LEN:"<<lens(i)<<endl;
-                for(auto j=0; j<lens(i); ++j) {
-                    out_tensor(i,j) = data[j];
-                    cout<<j<<":"<<data[j]<<endl;
-                }
+
+            for(auto j=0; j<data_nr; ++j) {
+                out_tensor(j) = res_data[j];
+            }
+            for(auto j=0; j<res_data1.size(); ++j) {
+                out_tensor1(j) = res_data1[j];
             }
         }
         static auto get_distance(const Eigen::Tensor<float,1,Eigen::RowMajor>& box0,
@@ -535,6 +628,14 @@ class MergeLineBoxesOp: public OpKernel {
         ) {
             float xdis;
             const float ydis = fabs(box0(0)+box0(2)-box1(0)-box1(2))/2.0f;
+            const float box_h = (box0(2)-box0(0));
+
+            if(fabs(box_h-(box1(2)-box1(0)))>1e-2) {
+                cout<<"Error box height "<<box_h<<", "<<(box1(2)-box1(0))<<endl;
+            }
+
+            if(ydis<0.8*box_h)
+                return make_pair(1e8f,1e8f);
 
             if(box0(1)>=box1(3)) {
                 xdis = box0(1)-box1(3);
@@ -543,13 +644,17 @@ class MergeLineBoxesOp: public OpKernel {
             } else {
                 xdis = 0.0f;
             }
+
             return make_pair(xdis,ydis);
         }
         static auto get_distance_matrix(const Eigen::Tensor<T,1,Eigen::RowMajor>& labels,
         const Eigen::Tensor<float,2,Eigen::RowMajor>& bboxes,int data_nr) {
+
             const auto kMaxDis = 1e8;
             Eigen::Tensor<float,3,Eigen::RowMajor> dis(data_nr,data_nr,2); //dis(x,y)
+
             dis.setConstant(kMaxDis);
+
             for(auto i=0; i<data_nr; ++i) {
                 dis(i,i,0) = 0;
                 dis(i,i,1) = 0;
@@ -564,17 +669,9 @@ class MergeLineBoxesOp: public OpKernel {
             }
             return dis;
         }
-        static float feature_map_distance(const Eigen::Tensor<float,1,Eigen::RowMajor>& data0, const Eigen::Tensor<float,1,Eigen::RowMajor>& data1) {
-            const Eigen::Tensor<float,0,Eigen::RowMajor> dis = (data0-data1).square().mean();
-            //return  1.0-2.0/(1+exp(dis(0)));
-            auto res = 1.0-2.0/(1+exp(dis(0)));
-            cout<<"FMD:"<<dis(0)<<","<<res<<endl;
-            return res;
-        }
         template<typename DT>
         void label_one(const DT& dis_matrix,
         int index,
-        const Eigen::Tensor<float,1,Eigen::RowMajor>& data_index,
         const Eigen::Tensor<float,2,Eigen::RowMajor>& data,
         vector<int>& ids,
         int data_nr) {
@@ -582,13 +679,13 @@ class MergeLineBoxesOp: public OpKernel {
                 if(ids[j]>0) continue;
                 if((dis_matrix(index,j,0) < dis_threshold_[0])
                         &&(dis_matrix(index,j,1) < dis_threshold_[1])
-                        && (feature_map_distance(data_index,data.chip(j,0))<threshold_)){
+                        && (data(index,j) <threshold_)){
                     ids[j] = ids[index];
-                    label_one(dis_matrix,j,data.chip(j,0),data,ids,data_nr);
+                    label_one(dis_matrix,j,data,ids,data_nr);
                 }
             }
         }
-        vector<int> process_one_batch(const Eigen::Tensor<float,2,Eigen::RowMajor>& data,
+        vector<int> process(const Eigen::Tensor<float,2,Eigen::RowMajor>& data,
         const Eigen::Tensor<T,1,Eigen::RowMajor>& labels,
         const Eigen::Tensor<float,2,Eigen::RowMajor>& bboxes,int data_nr) {
             const auto dis_matrix = get_distance_matrix(labels,bboxes,data_nr);
@@ -600,7 +697,7 @@ class MergeLineBoxesOp: public OpKernel {
                     ids[i] = ++id;
                 }
                 const Eigen::Tensor<float,1,Eigen::RowMajor> data_i = data.chip(i,0);
-                label_one(dis_matrix,i,data_i,data,ids,data_nr);
+                label_one(dis_matrix,i,data,ids,data_nr);
             }
             return ids;
         }
@@ -688,3 +785,62 @@ class GetImageResizeSizeOp: public OpKernel {
         }
 };
 REGISTER_KERNEL_BUILDER(Name("GetImageResizeSize").Device(DEVICE_CPU), GetImageResizeSizeOp);
+
+/*
+ * image[H,W]
+ * boxes[N,4], 绝对坐标
+ */
+REGISTER_OP("FillBBoxes")
+    .Attr("T: {float, double}")
+    .Attr("v: float")
+    .Input("image: T")
+    .Input("bboxes: T")
+	.Output("output:T")
+    .SetShapeFn([](shape_inference::InferenceContext* c){
+        c->set_output(0,c->input(0));
+		return Status::OK();
+    });
+
+template <typename Device, typename T>
+class FillBoxesOp: public OpKernel {
+	public:
+		explicit FillBoxesOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("v", &v_));
+		}
+
+		void Compute(OpKernelContext* context) override
+		{
+			const Tensor &_image      = context->input(0);
+			const Tensor &_bboxes     = context->input(1);
+
+			OP_REQUIRES(context, _image.dims() == 2, errors::InvalidArgument("images data must be 2-dimensional"));
+			OP_REQUIRES(context, _bboxes.dims() == 2, errors::InvalidArgument("boxes data must be 2-dimensional"));
+
+			auto          image       = _image.tensor<T,2>();
+			const auto    bboxes      = _bboxes.tensor<T,2>();
+            const auto    box_nr      = _bboxes.dim_size(0);
+
+			TensorShape  output_shape  = _image.shape();
+			Tensor      *output_tensor = nullptr;
+
+			OP_REQUIRES_OK(context,context->allocate_output(0,output_shape,&output_tensor));
+
+            auto out_tensor = output_tensor->tensor<T,2>();
+            out_tensor = image;
+            for(auto i=0; i<box_nr; ++i) 
+                draw_a_box(out_tensor,bboxes.chip(i,0));
+
+		}
+        template<typename IT>
+        void draw_a_box(IT& image,const Eigen::Tensor<T,1,Eigen::RowMajor>& box) {
+            for(auto x=box(1); x<=box(3); ++x) {
+                for(auto y=box(0); y<=box(2); ++y) {
+                    image(y,x) = v_;
+                }
+            }
+        }
+	private:
+		float v_ = 1.0;
+
+};
+REGISTER_KERNEL_BUILDER(Name("FillBBoxes").Device(DEVICE_CPU).TypeConstraint<float>("T"), FillBoxesOp<CPUDevice, float>);
