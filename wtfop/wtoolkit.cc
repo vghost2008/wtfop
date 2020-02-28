@@ -353,6 +353,7 @@ class SampleLabelsOp: public OpKernel {
             auto          ids         =  _ids.tensor<T,2>();
             auto          line_no     =  _line_no.tensor<T,2>();
             auto          batch_size  =  labels.dimension(0);
+            const auto    line_no_br  =  line_no.dimension(0);
             int dims_3d[] = {batch_size,sample_nr_,3};
             TensorShape outshape0;
             Tensor *output_data = NULL;
@@ -367,7 +368,7 @@ class SampleLabelsOp: public OpKernel {
             for(auto i=0; i<batch_size; ++i) {
                 res.emplace_back(async(launch::async,&SampleLabelsOp<Device,T>::sample_one_batch,Eigen::Tensor<T,1,Eigen::RowMajor>(ids.chip(i,0)),
                 Eigen::Tensor<T,1,Eigen::RowMajor>(labels.chip(i,0)),
-                line_no.chip(i,0),
+                line_no.chip(line_no_br>1?i:0,0),
                 sample_nr_));
             }
 

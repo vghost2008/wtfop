@@ -375,3 +375,15 @@ def bilateral_filter(image,d=5,sigmaColor=5,sigmaSpace=4):
 
 def fill_bboxes(image,bboxes,v=1.0):
     return wtfop_module.fill_b_boxes(image=image,bboxes=bboxes,v=v)
+
+#OCR ops
+def merge_character(bboxes, labels,dlabels, expand=0.01,super_box_type=68,space_type=69):
+    out = wtfop_module.merge_character(bboxes=bboxes,labels=labels,dlabels=dlabels,expand=expand,super_box_type=super_box_type,space_type=space_type)
+    return out
+def simple_merge_character(labels,windex):
+    out = wtfop_module.simple_merge_character(labels=labels,windex=windex)
+    return out
+
+def mach_words(targets, texts):
+    out = wtfop_module.mach_words(targets=targets,texts=texts)
+    return out
