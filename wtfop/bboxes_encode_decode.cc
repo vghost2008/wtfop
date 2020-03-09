@@ -342,8 +342,6 @@ class BoxesEncodeOp<GPUDevice,T>: public OpKernel {
 
             BoxesEncodeUnit<GPUDevice,T> encode_unit(pos_threshold,neg_threshold,prio_scaling,max_overlap_as_pos_);
             for(auto i=0; i<batch_size; ++i) {
-            //auto shard = [&](int64 start,int64 limit){
-             //   for(auto i=start; i<limit; ++i) {
                     
                     auto size    = bottom_gsize(i);
                     auto boxes   = bottom_boxes.dimension(0)==batch_size?chip_data(bottom_boxes,i):chip_data(bottom_boxes,0);
@@ -358,11 +356,6 @@ class BoxesEncodeOp<GPUDevice,T>: public OpKernel {
                             size,bottom_boxes.dimension(1)
                             );
                 }
-/*            };
-            list<future<void>> results;
-            for(auto i=0; i<batch_size; ++i) {
-                results.emplace_back(async(launch::async,[i,&shard](){ shard(i,i+1);}));
-            }*/
         }
 	private:
 		float         pos_threshold;

@@ -29,6 +29,7 @@ ops.NotDifferentiable("GetBoxesDeltas")
 module_path = os.path.realpath(__file__)
 module_dir = os.path.dirname(module_path)
 lib_path = os.path.join(module_dir, 'wtfop.so')
+print(lib_path)
 wtfop_module = tf.load_op_library(lib_path)
 
 def roi_pooling(input, rois, pool_height, pool_width,spatial_scale=1.0):

@@ -13,7 +13,7 @@
 //#include "unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
-#include "tensorflow/core/framework/tensor_shape.h"
+#include "tensorflow/core/framework/tensor_shape.h" 
 #include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/util/work_sharder.h"
 #include "bboxes.h"
@@ -192,6 +192,7 @@ class MatcherOp<GPUDevice,T>: public OpKernel {
 			auto output_indict_tensor         =  output_indict->template tensor<int,2>();
 
             MatcherUnit<GPUDevice,T> encode_unit(pos_threshold,neg_threshold,max_overlap_as_pos_);
+
             for(auto i=0; i<batch_size; ++i) {
                     auto size    = bottom_gsize(i);
                     auto boxes   = bottom_boxes.dimension(0)==batch_size?chip_data(bottom_boxes,i):chip_data(bottom_boxes,0);

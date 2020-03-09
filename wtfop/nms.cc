@@ -62,8 +62,8 @@ class BoxesNmsOp: public OpKernel {
             TIME_THIS();
 			const Tensor &bottom_box          = context->input(0);
 			const Tensor &bottom_classes      = context->input(1);
-			auto          bottom_box_flat     = bottom_box.flat<T>();
-			auto          bottom_classes_flat = bottom_classes.flat<int32>();
+			auto          bottom_box_flat     = bottom_box.flat<T>().data();
+			auto          bottom_classes_flat = bottom_classes.flat<int32>().data();
 
 			OP_REQUIRES(context, bottom_box.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
 			OP_REQUIRES(context, bottom_classes.dims() == 1, errors::InvalidArgument("classes data must be 1-dimensional"));
@@ -74,10 +74,11 @@ class BoxesNmsOp: public OpKernel {
 
 			for(auto i=0; i<loop_end; ++i) {
 				if(keep_mask[i]) {
-					const auto iclass = bottom_classes_flat(i);
+					const auto iclass = bottom_classes_flat[i];
+                    const auto src_box = bottom_box_flat+i*4;
 					for(auto j=i+1; j<data_nr; ++j) {
-						if(classes_wise && (bottom_classes_flat(j) != iclass)) continue;
-						if(bboxes_jaccard(bottom_box_flat.data()+i*4,bottom_box_flat.data()+j*4) < threshold) continue;
+						if(classes_wise && (bottom_classes_flat[j] != iclass)) continue;
+						if(bboxes_jaccard(src_box,bottom_box_flat+j*4) < threshold) continue;
 						keep_mask[j] = false;
 					}
 				}
@@ -106,9 +107,9 @@ class BoxesNmsOp: public OpKernel {
 
 			for(int i=0,j=0; i<data_nr; ++i) {
 				if(!keep_mask[i]) continue;
-				auto box = bottom_box_flat.data()+i*4;
+				auto box = bottom_box_flat+i*4;
 				std::copy(box,box+4,obox.data()+4*j);
-				oclasses(j) = bottom_classes_flat(i);
+				oclasses(j) = bottom_classes_flat[i];
 				oindex(j) = i;
 				++j;
 				if(j>=out_size)
@@ -159,8 +160,8 @@ class GroupBoxesNmsOp: public OpKernel {
 			const Tensor &bottom_box          = context->input(0);
 			const Tensor &bottom_classes      = context->input(1);
 			const Tensor &_group              = context->input(2);
-			auto          bottom_box_flat     = bottom_box.flat<T>();
-			auto          bottom_classes_flat = bottom_classes.flat<int32>();
+			auto          bottom_box_flat     = bottom_box.flat<T>().data();
+			auto          bottom_classes_flat = bottom_classes.flat<int32>().data();
 			auto          group               = _group.template tensor<int,2>();
 
 			OP_REQUIRES(context, bottom_box.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
@@ -173,11 +174,12 @@ class GroupBoxesNmsOp: public OpKernel {
 
 			for(auto i=0; i<loop_end; ++i) {
 				if(keep_mask[i]) {
-					const auto iclass = bottom_classes_flat(i);
+					const auto iclass = bottom_classes_flat[i];
                     const auto igroup = get_group(group,iclass);
+                    const auto src_box = bottom_box_flat+i*4;
 					for(auto j=i+1; j<data_nr; ++j) {
-						if(igroup != get_group(group,bottom_classes_flat(j))) continue;
-						if(bboxes_jaccard(bottom_box_flat.data()+i*4,bottom_box_flat.data()+j*4) < threshold) continue;
+						if(igroup != get_group(group,bottom_classes_flat[j])) continue;
+						if(bboxes_jaccard(src_box,bottom_box_flat+j*4) < threshold) continue;
 						keep_mask[j] = false;
 					}
 				}
@@ -205,9 +207,9 @@ class GroupBoxesNmsOp: public OpKernel {
 
 			for(int i=0,j=0; i<data_nr; ++i) {
 				if(!keep_mask[i]) continue;
-				auto box = bottom_box_flat.data()+i*4;
+				auto box = bottom_box_flat+i*4;
 				std::copy(box,box+4,obox.data()+4*j);
-				oclasses(j) = bottom_classes_flat(i);
+				oclasses(j) = bottom_classes_flat[i];
 				oindex(j) = i;
 				++j;
 			}
@@ -565,11 +567,12 @@ class BoxesNmsNr2Op: public OpKernel {
 
 		void Compute(OpKernelContext* context) override
 		{
+            TIME_THISV1("NmsNr2");
 			const Tensor &bottom_box          = context->input(0);
 			const Tensor &bottom_classes      = context->input(1);
 			const Tensor &confidence          = context->input(2);
-			auto          bottom_box_flat     = bottom_box.flat<T>();
-			auto          bottom_classes_flat = bottom_classes.flat<int32>();
+			auto          bottom_box_flat     = bottom_box.flat<T>().data();
+			auto          bottom_classes_flat = bottom_classes.flat<int32>().data();
 			auto          confidence_flat     = confidence.flat<T>();
 
 
@@ -580,24 +583,24 @@ class BoxesNmsNr2Op: public OpKernel {
 			vector<bool> keep_mask(data_nr,true);
 			const auto   loop_end              = data_nr-1;
 
-            auto loop_fn = [&](float threshold) {
-				for(auto i=0; i<loop_end; ++i) {
-					if(!keep_mask.at(i)) continue;
-					const auto iclass = bottom_classes_flat(i);
-					for(auto j=i+1; j<data_nr; ++j) {
-						if(classes_wise_ && (bottom_classes_flat(j) != iclass)) continue;
-						if(!keep_mask.at(j)) continue;
-						if(bboxes_jaccard(bottom_box_flat.data()+i*4,bottom_box_flat.data()+j*4) < threshold) continue;
-						keep_mask[j] = false;
-					}
-				}
-            };
 
             if(k_>data_nr) {
                 cout<<"Error input size is less than require ("<<data_nr<<" vs "<<k_<<")."<<endl;
             }
 
-            loop_fn(threshold_);
+            {
+				for(auto i=0; i<loop_end; ++i) {
+					if(!keep_mask.at(i)) continue;
+					const auto iclass = bottom_classes_flat[i];
+                    const auto src_box = bottom_box_flat+i*4;
+					for(auto j=i+1; j<data_nr; ++j) {
+						if(classes_wise_ && (bottom_classes_flat[j] != iclass)) continue;
+						if(!keep_mask[j]) continue;
+						if(bboxes_jaccard(src_box,bottom_box_flat+j*4) < threshold_) continue;
+						keep_mask[j] = false;
+					}
+				}
+            };
 			auto out_size = count(keep_mask.begin(),keep_mask.end(),true);
 
             if(out_size<k_) {
@@ -613,7 +616,7 @@ class BoxesNmsNr2Op: public OpKernel {
                             if((*kt) == false) 
                                 continue;
                             auto index0 = std::distance(keep_mask.begin(),kt);
-                            auto iou = bboxes_jaccard(bottom_box_flat.data()+index*4,bottom_box_flat.data()+index0*4);
+                            auto iou = bboxes_jaccard(bottom_box_flat+index*4,bottom_box_flat+index0*4);
                             score *= (1.0-iou);
                         }
                         datas.emplace_back(int(index),score);
@@ -625,7 +628,7 @@ class BoxesNmsNr2Op: public OpKernel {
                     datas.erase(jt);
                     for(auto jt=datas.begin(); jt!=datas.end(); ++jt) {
                         auto index0 = jt->index;
-                        auto iou = bboxes_jaccard(bottom_box_flat.data()+index*4,bottom_box_flat.data()+index0*4);
+                        auto iou = bboxes_jaccard(bottom_box_flat+index*4,bottom_box_flat+index0*4);
                         jt->score *= (1.0-iou);
                     }
                 }
@@ -668,9 +671,9 @@ class BoxesNmsNr2Op: public OpKernel {
 
 			for(i=0,j=0; i<data_nr; ++i) {
 				if(!keep_mask[i]) continue;
-				auto box = bottom_box_flat.data()+i*4;
+				auto box = bottom_box_flat+i*4;
 				std::copy(box,box+4,obox.data()+4*j);
-				oclasses(j) = bottom_classes_flat(i);
+				oclasses(j) = bottom_classes_flat[i];
 				oindex(j) = i;
 				++j;
 				if(j>=out_size) break;
@@ -679,9 +682,9 @@ class BoxesNmsNr2Op: public OpKernel {
 				cout<<"out size = "<<out_size<<", in size = "<<data_nr<<", j= "<<j<<std::endl;
                 auto i = data_nr-1;
                 for(;j<out_size; ++j) {
-                    auto box = bottom_box_flat.data()+i*4;
+                    auto box = bottom_box_flat+i*4;
                     std::copy(box,box+4,obox.data()+4*j);
-                    oclasses(j) = bottom_classes_flat(i);
+                    oclasses(j) = bottom_classes_flat[i];
                     oindex(j) = i;
                 }
             }

@@ -8,7 +8,8 @@ import wml_utils as wmlu
 import random
 import time
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+import object_detection.bboxes as odb
+os.environ['CUDA_VISIBLE_DEVICES'] = '2'
 
 class WTFOPTest(tf.test.TestCase):
     @staticmethod
@@ -25,7 +26,7 @@ class WTFOPTest(tf.test.TestCase):
             res.append(WTFOPTest.get_random_box())
         return np.array(res)
 
-    '''def testEncodeBoxes(self):
+    def testEncodeBoxes(self):
         with self.test_session() as sess:
             with tf.device("/gpu:0"):
                 #人工核算
@@ -60,7 +61,8 @@ class WTFOPTest(tf.test.TestCase):
                 self.assertAllEqual(a=target_out_indices,b=out_indices)
                 self.assertAllClose(a=target_out_boxes,b=out_boxes,atol=1e-4,rtol=0.)
                 self.assertAllEqual(a=target_out_labels,b=out_labels)
-                self.assertAllClose(a=target_out_scores,b=out_scores,atol=1e-5,rtol=0.)
+                mask = target_out_indices>0
+                self.assertAllClose(a=target_out_scores[mask],b=out_scores[mask],atol=1e-5,rtol=0.)
                 self.assertAllClose(a=r_boxes,b=np_boxes,atol=1e-5,rtol=0.)
 
     def testEncodeBoxes2(self):
@@ -119,13 +121,15 @@ class WTFOPTest(tf.test.TestCase):
             glabels = tf.constant(np_labels);
             boxes = tf.constant(np_boxes,dtype=tf.float32)
             lens = tf.constant(np_lens,dtype=tf.int32)
-            out_boxes, out_labels, out_scores, out_remove_indices,indices = boxes_encode(tf.expand_dims(boxes,0),
+            with tf.device(":/cpu:0"):
+                out_boxes, out_labels, out_scores, out_remove_indices,indices = boxes_encode(tf.expand_dims(boxes,0),
                                                                                  tf.expand_dims(gboxes,0),
                                                                                  tf.expand_dims(glabels,0),
                                                                                  length=lens,
                                                                                  pos_threshold=0.7,
                                                                                  neg_threshold=0.3,
-                                                                                 prio_scaling=[0.1, 0.1, 0.2, 0.2])
+                                                                                 prio_scaling=[0.1, 0.1, 0.2, 0.2],
+                                                                                 max_overlap_as_pos=True)
             out_boxes, out_labels, out_scores, out_remove_indices,out_indices = sess.run([out_boxes, out_labels, out_scores, out_remove_indices,indices])
             target_out_boxes = np.array([[[0.,0.,0.,0.],
                                           [0.,0.,0.,0.],
@@ -141,7 +145,8 @@ class WTFOPTest(tf.test.TestCase):
             self.assertAllEqual(a=target_out_remove_indices,b=out_remove_indices)
             self.assertAllClose(a=target_out_boxes,b=out_boxes,atol=1e-4,rtol=0.)
             self.assertAllEqual(a=target_out_labels,b=out_labels)
-            self.assertAllClose(a=target_out_scores,b=out_scores,atol=1e-5,rtol=0.)
+            mask = target_out_indices>0
+            self.assertAllClose(a=target_out_scores[mask],b=out_scores[mask],atol=1e-5,rtol=0.)
 
     def testDecodeBoxes(self):
         with self.test_session() as sess:
@@ -159,7 +164,8 @@ class WTFOPTest(tf.test.TestCase):
                                                                                  glabels,
                                                                                  pos_threshold=0.7,
                                                                                  neg_threshold=0.3,
-                                                                                 prio_scaling=[0.1, 0.1, 0.2, 0.2])
+                                                                                 prio_scaling=[0.1, 0.1, 0.2, 0.2],
+                                                                                 max_overlap_as_pos=True)
             out_boxes, out_labels, out_scores, out_remove_indices = sess.run([out_boxes, out_labels, out_scores, out_remove_indices])
             target_out_boxes = np.array([[0.,0.,0.,0.],
                                           [0.,0.,0.,0.],
@@ -185,7 +191,7 @@ class WTFOPTest(tf.test.TestCase):
                                          [0.09999999,0.09999999,0.4,0.4],
                                          [0.6999999,0.7,0.9,0.8],
                                          [0.3,0.3,0.5,0.6]])
-            self.assertAllClose(a=out_new_boxes,b=target_new_boxes,atol=1e-5,rtol=0.)'''
+            self.assertAllClose(a=out_new_boxes,b=target_new_boxes,atol=1e-5,rtol=0.)
 
     def testEncodeBoxesSpeed(self):
         config = tf.ConfigProto()
@@ -194,7 +200,7 @@ class WTFOPTest(tf.test.TestCase):
         with self.test_session(config=config) as sess:
             g_nr = 10000
             a_nr = 10000
-            max_overlap_as_pos = False
+            max_overlap_as_pos = True
             np_gboxes0 = self.get_random_boxes(g_nr)
             np_gboxes1 = self.get_random_boxes(g_nr)
             np_labels0 = np.random.randint(100,size=[g_nr])
@@ -213,7 +219,8 @@ class WTFOPTest(tf.test.TestCase):
                                                                                  length=lens,
                                                                                  pos_threshold=0.7,
                                                                                  neg_threshold=0.3,
-                                                                                 prio_scaling=[0.1, 0.1, 0.2, 0.2],max_overlap_as_pos=max_overlap_as_pos)
+                                                                                 prio_scaling=[0.1, 0.1, 0.2, 0.2],
+                                                                                 max_overlap_as_pos=max_overlap_as_pos)
             with tf.device("/gpu:0"):
                 out_boxes0, out_labels0, out_scores0, out_remove_indices0,indices0 = boxes_encode(boxes,
                                                                                  gboxes,
@@ -221,7 +228,8 @@ class WTFOPTest(tf.test.TestCase):
                                                                                  length=lens,
                                                                                  pos_threshold=0.7,
                                                                                  neg_threshold=0.3,
-                                                                                 prio_scaling=[0.1, 0.1, 0.2, 0.2],max_overlap_as_pos=max_overlap_as_pos)
+                                                                                 prio_scaling=[0.1, 0.1, 0.2, 0.2],
+                                                                                 max_overlap_as_pos=max_overlap_as_pos)
             with wmlu.TimeThis("CPU"):
                 out_boxes, cout_labels, cout_scores, cout_remove_indices,cout_indices = sess.run([out_boxes, out_labels, out_scores, out_remove_indices,indices])
             with wmlu.TimeThis("GPU"):
@@ -238,7 +246,8 @@ class WTFOPTest(tf.test.TestCase):
             b = gout_labels
             self.assertAllEqual(a=a,b=b)
 
-    '''def testDecodeBBoxesSpeed(self):
+
+    def testDecodeBBoxesSpeed(self):
         config = tf.ConfigProto()
         config.gpu_options.allow_growth = True
         with self.test_session(config=config) as sess:
@@ -255,7 +264,7 @@ class WTFOPTest(tf.test.TestCase):
                 cout = sess.run(cout)
             with wmlu.TimeThis("GPUDecode-----------"):
                 gout = sess.run(gout)
-            self.assertAllClose(a=cout,b=gout,atol=1e-4,rtol=0.)'''
+            self.assertAllClose(a=cout,b=gout,atol=1e-4,rtol=0.)
 
 if __name__ == "__main__":
     random.seed(int(time.time()))

@@ -34,11 +34,12 @@ __global__ void get_scores_and_indexs(const float* gbboxes,const float* anchor_b
 
     for(auto i=0; i<4; ++i)
         abbox[i] = (anchor_bboxes+(a_index<<2))[i];
-
+#ifdef PROCESS_BOUNDARY_ANCHORS
     if(cuda_is_cross_boundaries(abbox)) { 
         is_boundary_box[a_index] = true;
         return;
     }
+#endif
 
     for(auto i=g_offset; i<gb_size; i += blockDim.x) {
         for(auto j=0; j<4; ++j)

@@ -97,7 +97,8 @@ class WTFOPTest(tf.test.TestCase):
             self.assertAllEqual(a=target_out_indices,b=out_indices)
             self.assertAllClose(a=target_out_boxes,b=out_boxes,atol=1e-4,rtol=0.)
             self.assertAllEqual(a=target_out_labels,b=out_labels)
-            self.assertAllClose(a=target_out_scores,b=out_scores,atol=1e-5,rtol=0.)
+            mask = target_out_labels>0
+            self.assertAllClose(a=target_out_scores[mask],b=out_scores[mask],atol=1e-5,rtol=0.)
 
     def test_adjacent_matrix_generator(self):
         np_gboxes = np.array([
@@ -158,7 +159,8 @@ class WTFOPTest(tf.test.TestCase):
             self.assertAllEqual(a=target_out_remove_indices,b=out_remove_indices)
             self.assertAllClose(a=target_out_boxes,b=out_boxes,atol=1e-4,rtol=0.)
             self.assertAllEqual(a=target_out_labels,b=out_labels)
-            self.assertAllClose(a=target_out_scores,b=out_scores,atol=1e-5,rtol=0.)
+            mask = target_out_labels>0
+            self.assertAllClose(a=target_out_scores[mask],b=out_scores[mask],atol=1e-5,rtol=0.)
 
     def testDecodeBoxes(self):
         with self.test_session() as sess:
@@ -175,7 +177,8 @@ class WTFOPTest(tf.test.TestCase):
                                                                                  glabels,
                                                                                  pos_threshold=0.7,
                                                                                  neg_threshold=0.3,
-                                                                                 prio_scaling=[0.1, 0.1, 0.2, 0.2])
+                                                                                 prio_scaling=[0.1, 0.1, 0.2, 0.2],
+                                                                                 max_overlap_as_pos=True)
             out_boxes, out_labels, out_scores, out_remove_indices = sess.run([out_boxes, out_labels, out_scores, out_remove_indices])
             target_out_boxes = np.array([[0.,0.,0.,0.],
                                           [0.,0.,0.,0.],
@@ -189,7 +192,8 @@ class WTFOPTest(tf.test.TestCase):
             self.assertAllEqual(a=target_out_remove_indices,b=out_remove_indices)
             self.assertAllClose(a=target_out_boxes,b=out_boxes,atol=1e-4,rtol=0.)
             self.assertAllEqual(a=target_out_labels,b=out_labels)
-            self.assertAllClose(a=target_out_scores,b=out_scores,atol=1e-5,rtol=0.)
+            mask = target_out_labels>0
+            self.assertAllClose(a=target_out_scores[mask],b=out_scores[mask],atol=1e-5,rtol=0.)
             keep_indices = tf.logical_and(tf.logical_not(out_remove_indices),tf.greater(out_scores,0.1))
             boxes = tf.boolean_mask(boxes,keep_indices)
             out_boxes = tf.boolean_mask(out_boxes,keep_indices)
@@ -261,7 +265,7 @@ class WTFOPTest(tf.test.TestCase):
                 out = sess.run(out)
                 self.assertAllEqual(out,value)
 
-    def testSampleLabels(self):
+    '''def testSampleLabels(self):
         print("Test sample labels")
         ids = tf.placeholder(dtype=tf.int32,shape=[2,None])
         labels = tf.placeholder(dtype=tf.int32,shape=[2,None])
@@ -281,7 +285,7 @@ class WTFOPTest(tf.test.TestCase):
             _labels = np.array([[1,1,1,1,2,2,2,0],[1,1,1,1,3,3,3,1]])
             feed_dict = {ids:_ids,labels:_labels}
             r = sess.run(res,feed_dict=feed_dict)
-            wmlu.show_list(r)
+            wmlu.show_list(r)'''
 
     def testBoxesMatch(self):
         with self.test_session() as sess:
@@ -318,7 +322,7 @@ class WTFOPTest(tf.test.TestCase):
             adj_mt = wop.adjacent_matrix_generator_by_iou(bboxes,0.5,True)
             self.assertAllEqual(adj_mt.eval(),[[0,1,0,0],[1,0,1,0],[0,1,0,1],[0,0,1,0]])
 
-    def test_merge_line_bboxes(self):
+    '''def test_merge_line_bboxes(self):
         print("test merge line bboxes")
         with self.test_session() as sess:
             bboxes = np.array([[[0.0,0.0,0.01,0.5],[0.01,0.01,0.11,0.4],[0.4,0.0,0.41,0.5],[0.4,0.51,0.41,0.9]]])
@@ -330,7 +334,7 @@ class WTFOPTest(tf.test.TestCase):
             dis_threshold = [0.1,0.1]
             ids = wop.merge_line_boxes(data=datas,labels=labels,bboxes=bboxes,lens=lens,threshold=threshold,dis_threshold=dis_threshold)
             r_ids = sess.run(ids)
-            print(r_ids)
+            print(r_ids)'''
 
     def test_center_boxes_decode(self):
         with self.test_session() as sess:

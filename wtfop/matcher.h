@@ -141,7 +141,7 @@ class MatcherUnit<Eigen::GpuDevice,T> {
              }
         void operator()(
                 const T* boxes,const T* gboxes,const int* glabels,
-                float* out_bboxes,int* out_labels,float* out_scores,bool* out_remove_indict,int* out_index,
+                int* out_labels,float* out_scores,int* out_index,
                 int gdata_nr,int data_nr
                 )
         {

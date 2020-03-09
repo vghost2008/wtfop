@@ -6,16 +6,18 @@ TF_LIB = $(shell python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib(
 #TF_LIB = $(shell /usr/local/anaconda3/bin/python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib())')
 #TF_LIB = $(shell /home/wj/anaconda3_cpu/bin/python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib())')
 #TF_LIB = "/home/vghost/.local/lib/python3.6/site-packages/tensorflow"
-#USE_CUDA := "YES"
+USE_CUDA := "YES"
 #all: build
 #all: clean build
 #g++ -std=c++14 -shared -g -o $@ $^ -I $(TF_INC) -fPIC -D_GLIBCXX_USE_CXX11_ABI=0 -L${TF_LIB} -ltensorflow_framework 
 #CXXFLAGS = -I ${TF_INC} -fPIC -L${TF_LIB} -ltensorflow_framework -D_GLIBCXX_USE_CXX11_ABI
 CXX11_ABI=0
-CXXFLAGS = -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared -g -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -fPIC -L${TF_LIB} -ltensorflow_framework `pkg-config --cflags opencv` `pkg-config --libs opencv`
+OPT = -O3
+CUDA_OPT = -O0
+CXXFLAGS = -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared ${OPT} -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -fPIC -L${TF_LIB} -ltensorflow_framework `pkg-config --cflags opencv` `pkg-config --libs opencv`
 #CUDAFLAGS = -std=c++14 -g -shared -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=0 -DGOOGLE_CUDA --expt-relaxed-constexpr -Xcompiler="-fPIC"
 #CUDAFLAGS = -std=c++14 -g -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=0 -DGOOGLE_CUDA --expt-relaxed-constexpr -Xcompiler="-fPIC" -arch=sm_30
-CUDAFLAGS = -std=c++14 -g -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -DGOOGLE_CUDA --expt-relaxed-constexpr -Xcompiler="-fPIC" -gencode arch=compute_60,code=compute_60
+CUDAFLAGS = -std=c++14 ${CUDA_OPT} -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -DGOOGLE_CUDA --expt-relaxed-constexpr -Xcompiler="-fPIC" -gencode arch=compute_60,code=compute_60
 
 build: wtfop.so
 
@@ -37,7 +39,7 @@ matcher_gpu.o:matcher_gpu.cu
 wtfop.so:${targets}
 	echo $CXXFLAGS
 	echo $^
-	g++ -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared -g -o $@ $^ -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -fPIC -L${TF_LIB} -ltensorflow_framework  `pkg-config --cflags opencv` `pkg-config --libs opencv`
+	g++ -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared ${OPT} -o $@ $^ -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -fPIC -L${TF_LIB} -ltensorflow_framework  `pkg-config --cflags opencv` `pkg-config --libs opencv`
 
 clean:
 	rm -f *.o *.so *.pyc *.npy

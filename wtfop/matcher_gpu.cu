@@ -4,6 +4,7 @@
 #include <iostream>
 #include <iomanip>
 #include "wmacros.h"
+#include "bboxes.cu.h"
 using namespace std;
 constexpr auto kBlockSize = 64;
 
