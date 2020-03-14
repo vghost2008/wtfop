@@ -68,6 +68,12 @@ class GetBoxesDeltasOp: public OpKernel {
 			const Tensor &_bottom_gboxes  = context->input(1);
 			const Tensor &_bottom_labels  = context->input(2);
 			const Tensor &_bottom_indices = context->input(3);
+
+			OP_REQUIRES(context, _bottom_boxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
+			OP_REQUIRES(context, _bottom_gboxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
+			OP_REQUIRES(context, _bottom_labels.dims() == 2, errors::InvalidArgument("labels data must be 2-dimensional"));
+			OP_REQUIRES(context, _bottom_indices.dims() == 2, errors::InvalidArgument("index data must be 1-dimensional"));
+
 			auto          bottom_boxes    = _bottom_boxes.template tensor<T,3>();
 			auto          bottom_gboxes   = _bottom_gboxes.template tensor<T,3>();
 			auto          bottom_labels   = _bottom_labels.template tensor<int,2>();
@@ -75,10 +81,6 @@ class GetBoxesDeltasOp: public OpKernel {
 			const auto    batch_size      = _bottom_gboxes.dim_size(0);
 			const auto    data_nr         = _bottom_boxes.dim_size(1);
 
-			OP_REQUIRES(context, _bottom_boxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
-			OP_REQUIRES(context, _bottom_gboxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
-			OP_REQUIRES(context, _bottom_labels.dims() == 2, errors::InvalidArgument("labels data must be 2-dimensional"));
-			OP_REQUIRES(context, _bottom_indices.dims() == 2, errors::InvalidArgument("index data must be 1-dimensional"));
 
 			int dims_3d[] = {batch_size,data_nr,_bottom_boxes.dim_size(2)};
 			TensorShape   outshape0 = _bottom_boxes.shape();
@@ -544,7 +546,6 @@ class BoxesEncode1Op<GPUDevice,T>: public OpKernel {
                     nullptr,
                     size,bottom_boxes.dimension(0)
                     );
-           //cout<<"USE GPU encode1"<<endl;
         }
 	private:
 		float         pos_threshold;

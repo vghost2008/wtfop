@@ -70,17 +70,19 @@ class MatcherUnit<Eigen::ThreadPoolDevice,T> {
 
 						auto        jaccard   = bboxes_jaccardv1(gbox,box);
 
-						if(jaccard<1E-8) continue;
+						if(jaccard<MIN_SCORE_FOR_POS_BOX) continue;
 
 						if(jaccard>max_scores) {
 							max_scores = jaccard;
 							max_index = j;
 						}
 
-						auto       &iou_index = iou_indexs[j];
 
                         {
                             std::lock_guard<std::mutex> g(mtx);
+
+						    auto       &iou_index = iou_indexs[j];
+
                             if(jaccard>iou_index.iou) {
                                 iou_index.iou = jaccard;
                                 iou_index.index = i;
@@ -90,13 +92,13 @@ class MatcherUnit<Eigen::ThreadPoolDevice,T> {
                             }
                         }
 					}
-					if(max_scores<1E-8) continue;
+					if(max_scores<MIN_SCORE_FOR_POS_BOX) continue;
 					/*
 					 * 面积交叉最大的给于标签
 					 */
 					auto j = max_index;
 
-                    if(max_overlap_as_pos_) {
+                    if(max_overlap_as_pos_ ) {
                         std::lock_guard<std::mutex> g(mtx);
                         is_max_score[j] = true;
                     }

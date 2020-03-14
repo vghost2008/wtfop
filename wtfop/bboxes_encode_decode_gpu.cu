@@ -4,6 +4,7 @@
 #include <iostream>
 #include <iomanip>
 #include "bboxes.cu.h"
+#include "wmacros.h"
 using namespace std;
 constexpr auto kBlockSize = 64;
 
@@ -26,7 +27,7 @@ __global__ void get_scores_and_indexs(const float* gbboxes,const float* anchor_b
     auto             max_s                  = 1e-8;
     float            abbox[4];
     float            gbbox[4];
-    __shared__ short max_index[kBlockSize];
+    __shared__ int   max_index[kBlockSize];
     __shared__ float max_scores[kBlockSize];
     /*
      * gbboxes按kBlockSize划分为多个组，下面的代码找到在同一个组中与给定anchor box(a_index)对应的最大ground truth box(max_i,max_s)
@@ -85,15 +86,15 @@ __global__ void get_scores_and_indexs(const float* gbboxes,const float* anchor_b
  * scores0:[gb_size]
  * indexs0:[gb_size]
  */
-__global__ void find_max_score_index(const float* gbboxes,const float* anchor_bboxes,const bool* is_boundary_box,bool* is_max_score,size_t gb_size,size_t ab_size)
+__global__ void find_max_score_index(const float* gbboxes,const float* anchor_bboxes,const bool* is_boundary_box,bool* is_max_score,size_t ab_size)
 {
     const auto       g_index                = blockIdx.x;
     const auto       a_offset               = threadIdx.x;
     auto             max_i                  = -1;
-    auto             max_s                  = 1e-8;
+    auto             max_s                  = MIN_SCORE_FOR_POS_BOX;
     float            gbbox[4];
     float            abbox[4];
-    __shared__ short max_index[kBlockSize];
+    __shared__ int   max_index[kBlockSize];
     __shared__ float max_scores[kBlockSize];
 
     /*
@@ -123,7 +124,7 @@ __global__ void find_max_score_index(const float* gbboxes,const float* anchor_bb
      * 线程0找到唯一的最大anchor box索引
      */
     max_i = -1;
-    max_s = 1e-8;
+    max_s = MIN_SCORE_FOR_POS_BOX;
     for(auto i=0; i<blockDim.x; ++i) {
         const auto cs = max_scores[i];
         if(cs>max_s) {
@@ -131,7 +132,7 @@ __global__ void find_max_score_index(const float* gbboxes,const float* anchor_bb
             max_s = cs;
         }
     }
-    if(max_i>=0)
+    if(max_i>=0) 
         is_max_score[max_index[max_i]] = true;
 }
 __global__ void get_labels_and_remove_indices(int* indexs,float* scores,const bool* is_max_score,const int* glabels,int* out_labels,bool* remove_indices,float neg_threshold,float pos_threshold)
@@ -251,7 +252,7 @@ size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold,bool max_o
 
 
     if(max_overlap_as_pos) {
-        find_max_score_index<<<grid1,std::min<size_t>(kBlockSize,ab_size)>>>(gbboxes,anchor_bboxes,d_is_boundary_box.get(),d_is_max_score.get(),gb_size,ab_size);
+        find_max_score_index<<<grid1,std::min<size_t>(kBlockSize,ab_size)>>>(gbboxes,anchor_bboxes,d_is_boundary_box.get(),d_is_max_score.get(),ab_size);
         CHECK_CUDA_ERRORS(cudaPeekAtLastError());
         cudaDeviceSynchronize();
     }

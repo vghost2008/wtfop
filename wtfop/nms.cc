@@ -68,9 +68,9 @@ class BoxesNmsOp: public OpKernel {
 			OP_REQUIRES(context, bottom_box.dims() == 2, errors::InvalidArgument("box data must be 2-dimensional"));
 			OP_REQUIRES(context, bottom_classes.dims() == 1, errors::InvalidArgument("classes data must be 1-dimensional"));
 
-			const auto   data_nr           = bottom_box.dim_size(0);
+			const int    data_nr           = bottom_box.dim_size(0);
 			vector<bool> keep_mask(data_nr,true);
-			const auto   loop_end          = data_nr-1;
+			const int    loop_end          = data_nr-1;
 
 			for(auto i=0; i<loop_end; ++i) {
 				if(keep_mask[i]) {

@@ -218,6 +218,17 @@ void show_cuda_data(const T* data,size_t size, int col_nr=20,const std::string& 
     delete[] h_data;
 }
 template<typename T>
+__device__ void show_cuda_data_on_device(const T* data,size_t size, int col_nr=20,const char* name="cuda_data")
+{
+    printf("%s\n",name);
+    for(auto i=0; i<size;) {
+        for(auto j=0; (j<col_nr)&&(i<size); ++j,++i) {
+            printf("%f ",float(data[i]));
+        }
+        printf("\n");
+    }
+}
+template<typename T>
 void show_host_data(const T* h_data,size_t size, int col_nr=20,const std::string& name="cuda_data")
 {
     std::cout<<name<<std::endl;

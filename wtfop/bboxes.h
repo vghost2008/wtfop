@@ -299,7 +299,7 @@ class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
 
 						auto        jaccard   = bboxes_jaccardv1(gbox,box);
 
-						if(jaccard<1E-8) continue;
+						if(jaccard<MIN_SCORE_FOR_POS_BOX) continue;
 
 						if(jaccard>max_scores) {
 							max_scores = jaccard;
@@ -319,7 +319,7 @@ class BoxesEncodeUnit<Eigen::ThreadPoolDevice,T> {
                             }
                         }
 					}
-					if(max_scores<1E-8) continue;
+					if(max_scores<MIN_SCORE_FOR_POS_BOX) continue;
 					/*
 					 * 面积交叉最大的给于标签
 					 */
