@@ -666,38 +666,42 @@ class SetValueOp: public OpKernel {
 		explicit SetValueOp(OpKernelConstruction* context) : OpKernel(context) {
 		}
 		void Compute(OpKernelContext* context) override
-		{
-			const Tensor &_tensor        = context->input(0);
-			const Tensor &_v             = context->input(1);
-			const Tensor &_index         = context->input(2);
-			auto          tensor         = _tensor.template flat<T>().data();
-			auto          v              = _v.template flat<T>().data();
-			auto          index          = _index.template flat<int>().data();
-			auto          dim_nr         = _tensor.dims();
-			auto          skip_dim_nr    = _index.dim_size(0);
-			auto          offset         = 0;
-			const auto    block_size     = _v.NumElements();
-			auto          cur_block_size = block_size;
+        {
+            const Tensor &_tensor        = context->input(0);
+            const Tensor &_v             = context->input(1);
+            const Tensor &_index         = context->input(2);
+            auto          tensor         = _tensor.template flat<T>().data();
+            auto          v              = _v.template flat<T>().data();
+            auto          indexs         = _index.template tensor<int,2>();
+            auto          dim_nr         = _tensor.dims();
+            auto          skip_dim_nr    = _index.dim_size(1);
+            const auto    block_size     = _v.NumElements();
 
-			for(auto i=skip_dim_nr-1; i>=0; --i) {
-				offset += index[i]*cur_block_size;
-				cur_block_size *= _tensor.dim_size(i);
-			}
+            OP_REQUIRES(context, _index.dims()==2, errors::InvalidArgument("index must be 2-dimensional"));
 
-			OP_REQUIRES(context, _index.dims()==1, errors::InvalidArgument("index must be 1-dimensional"));
+            Tensor* output_data = NULL;
 
-			Tensor* output_data = NULL;
+            OP_REQUIRES_OK(context, context->allocate_output(0, _tensor.shape(), &output_data));
 
-			OP_REQUIRES_OK(context, context->allocate_output(0, _tensor.shape(), &output_data));
-
-			auto      oq_tensor = output_data->template flat<T>().data();
+            auto      oq_tensor = output_data->template flat<T>().data();
             copy(tensor,tensor+_tensor.NumElements(),oq_tensor);
 
-			/*
-			 * 如果原始数据中没有内容，使用0填充
-			 */
-			 copy(v,v+block_size,oq_tensor+offset);
-		}
+            /*
+             * 如果原始数据中没有内容，使用0填充
+             */
+            const auto nr = _index.dim_size(0);
+
+            for(auto i=0; i<nr; ++i) {
+                auto offset         = 0;
+                auto cur_block_size = block_size;
+
+                for(auto j=skip_dim_nr-1; j>=0; --j) {
+                    offset += indexs(i,j)*cur_block_size;
+                    cur_block_size *= _tensor.dim_size(j);
+                }
+                copy(v,v+block_size,oq_tensor+offset);
+            }
+        }
 };
 REGISTER_KERNEL_BUILDER(Name("SetValue").Device(DEVICE_CPU).TypeConstraint<int32_t>("T"), SetValueOp<CPUDevice, int32_t>);
 REGISTER_KERNEL_BUILDER(Name("SetValue").Device(DEVICE_CPU).TypeConstraint<float>("T"), SetValueOp<CPUDevice, float>);

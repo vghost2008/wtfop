@@ -263,8 +263,8 @@ def plane_position_embedding(size):
     return out 
 
 def set_value(tensor,v,index):
-    if index.get_shape().ndims is None or index.get_shape().ndims==0:
-        index = tf.reshape(index,[-1])
+    if index.get_shape().ndims is None or index.get_shape().ndims<2:
+        index = tf.reshape(index,[1,-1])
     if index.dtype is not tf.int32:
         index = tf.cast(index,tf.int32)
     out = wtfop_module.set_value(tensor=tensor,v=v,index=index)

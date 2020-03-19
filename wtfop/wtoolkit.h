@@ -12,7 +12,9 @@ inline void default_log_func(const std::string& v)
 {
     public:
         WTimeThis(const std::string& name,std::function<void(const std::string&)> func=default_log_func,bool autolog=true)
-            :name_(name),func_(func),t_(std::chrono::steady_clock::now()),autolog_(autolog){}
+            :name_(name),func_(func),t_(std::chrono::steady_clock::now()),autolog_(autolog)
+            {
+            }
         ~WTimeThis() {
             if(autolog_)
                 log();
