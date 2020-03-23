@@ -42,7 +42,7 @@ limitations under the License.
 #include "deform_conv.h"
 #include "deform_conv_util.h"
 
-
+using namespace std;
 namespace tensorflow {
 using shape_inference::DimensionHandle;
 using shape_inference::InferenceContext;
@@ -839,7 +839,6 @@ class DeformConvBackpropOp : public OpKernel {
       DeformConvParam* param_;
 
 };
-
 #if GOOGLE_CUDA
 
 #define REGISTER(T)                                                 \
