@@ -31,6 +31,8 @@ module_dir = os.path.dirname(module_path)
 lib_path = os.path.join(module_dir, 'wtfop.so')
 print(lib_path)
 wtfop_module = tf.load_op_library(lib_path)
+deform_conv_op = wtfop_module.deform_conv_op
+deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
 
 def roi_pooling(input, rois, pool_height, pool_width,spatial_scale=1.0):
     out = wtfop_module.roi_pooling(input, rois, pool_height=pool_height, pool_width=pool_width,spatial_scale=spatial_scale)
@@ -388,3 +390,30 @@ def simple_merge_character(labels,windex):
 def mach_words(targets, texts):
     out = wtfop_module.mach_words(targets=targets,texts=texts)
     return out
+
+
+@ops.RegisterGradient("DeformConvOp")
+def _deform_conv_grad(op, grad):
+    """The gradients for `deform_conv`.
+    Args:
+      op: The `deform_conv` `Operation` that we are differentiating, which we can use
+        to find the inputs and outputs of the original op.
+      grad: Gradient with respect to the output of the `roi_pool` op.
+    Returns:
+      Gradients with respect to the input of `zero_out`.
+    """
+    data = op.inputs[0]
+    filter = op.inputs[1]
+    offset = op.inputs[2]
+
+    strides = op.get_attr('strides')
+    rates = op.get_attr('rates')
+    num_groups = op.get_attr('num_groups')
+    padding = op.get_attr('padding')
+    data_format = op.get_attr('data_format')
+    deformable_group = op.get_attr('deformable_group')
+
+    # compute gradient
+    data_grad = deform_conv_grad_op(data, filter, offset, grad, strides, rates, num_groups, deformable_group, padding,
+                                    data_format)
+    return data_grad
