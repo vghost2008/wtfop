@@ -179,6 +179,7 @@ REGISTER_KERNEL_BUILDER(Name("PositionEmbedding").Device(DEVICE_CPU).TypeConstra
 
 REGISTER_OP("PlanePositionEmbedding")
     .Attr("T: {int32, int64}")
+	.Attr("ref_size:list(int)")
     .Input("size: T")
 	.Output("output:float");
 
@@ -186,6 +187,7 @@ template <typename Device, typename T>
 class PlanePositionEmbeddingOp: public OpKernel {
 	public:
 		explicit PlanePositionEmbeddingOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("ref_size", &ref_size_));
 		}
 
 		void Compute(OpKernelContext* context) override
@@ -199,6 +201,8 @@ class PlanePositionEmbeddingOp: public OpKernel {
             const auto batch_size = 1;
             const auto width      = size(1);
             const auto height     = size(0);
+            const auto ref_width  = ref_size_[1];
+            const auto ref_height = ref_size_[0];
 
             TensorShape output_shape0({batch_size,height,width});
             Tensor* output= NULL;
@@ -214,14 +218,16 @@ class PlanePositionEmbeddingOp: public OpKernel {
             for(auto i=0; i<batch_size; ++i) {
                 for(auto j=0; j<height; ++j) {
                     for(auto k=0; k<width; ++k) {
-                        const auto x = float(k)/width;
-                        const auto y = float(j)/width;
+                        const auto x = float(k)/ref_width;
+                        const auto y = float(j)/ref_width;
                         const auto v = (1-x/a-y/b)*c;
                         o_tensor(i,j,k) = v;
                     }
                 }
             }
         }
+  private:
+    vector<int> ref_size_;
 };
 REGISTER_KERNEL_BUILDER(Name("PlanePositionEmbedding").Device(DEVICE_CPU).TypeConstraint<int32_t>("T"), PlanePositionEmbeddingOp<CPUDevice, int32_t>);
 REGISTER_KERNEL_BUILDER(Name("PlanePositionEmbedding").Device(DEVICE_CPU).TypeConstraint<tensorflow::int64>("T"), PlanePositionEmbeddingOp<CPUDevice, tensorflow::int64>);

@@ -258,8 +258,8 @@ def position_embedding(size):
         out = tf.reshape(out,[1]+size)
     return out 
 
-def plane_position_embedding(size):
-    out = wtfop_module.plane_position_embedding(size=size)
+def plane_position_embedding(size,ref_size=[512,512]):
+    out = wtfop_module.plane_position_embedding(size=size,ref_size=ref_size)
     if isinstance(size,list):
         out = tf.reshape(out,[1]+size)
     return out 
