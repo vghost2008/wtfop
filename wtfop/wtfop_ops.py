@@ -31,8 +31,9 @@ module_dir = os.path.dirname(module_path)
 lib_path = os.path.join(module_dir, 'wtfop.so')
 print(lib_path)
 wtfop_module = tf.load_op_library(lib_path)
-deform_conv_op = wtfop_module.deform_conv_op
-deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
+random_select = wtfop_module.random_select
+#deform_conv_op = wtfop_module.deform_conv_op
+#deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
 
 def roi_pooling(input, rois, pool_height, pool_width,spatial_scale=1.0):
     out = wtfop_module.roi_pooling(input, rois, pool_height=pool_height, pool_width=pool_width,spatial_scale=spatial_scale)
@@ -105,10 +106,13 @@ def boxes_nms_nr(bboxes, classes, confidence=None,k=128,max_loop=5,classes_wise=
 def _boxes_nms_nr_grad(op, grad, _,_0):
   return [None,None]
 
-def boxes_nms_nr2(bboxes, classes, k=128,threshold=0.8,classes_wise=True,confidence=None):
+def boxes_nms_nr2(bboxes, classes, k=128,threshold=0.8,classes_wise=True,confidence=None,fast_mode=False):
     if classes.dtype != tf.int32:
         classes = tf.cast(classes,tf.int32)
-    out = wtfop_module.boxes_nms_nr2(bottom_box=bboxes,classes=classes,confidence=confidence,k=k,threshold=threshold,classes_wise=classes_wise)
+    if confidence is None:
+        confidence = tf.ones_like(classes,tf.float32)
+    out = wtfop_module.boxes_nms_nr2(bottom_box=bboxes,classes=classes,confidence=confidence,k=k,threshold=threshold,classes_wise=classes_wise,
+                                    fast_mode=fast_mode)
     return out[0],out[1],tf.cast(out[2],tf.int32)
 
 
@@ -260,8 +264,8 @@ def position_embedding(size):
 
 def plane_position_embedding(size,ref_size=[512,512]):
     out = wtfop_module.plane_position_embedding(size=size,ref_size=ref_size)
-    if isinstance(size,list):
-        out = tf.reshape(out,[1]+size)
+    if isinstance(size,Iterable) and not isinstance(size,tf.Tensor):
+        out = tf.reshape(out,[1]+list(size))
     return out 
 
 def set_value(tensor,v,index):

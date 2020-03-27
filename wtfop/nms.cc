@@ -519,6 +519,8 @@ REGISTER_KERNEL_BUILDER(Name("BoxesNmsNr").Device(DEVICE_CPU).TypeConstraint<flo
  * 要求数据已经按重要呈度从0到data_nr排好了序(从大到小）
  * bottom_box:[X,4](ymin,xmin,ymax,xmax)
  * classes:[X]
+ * threshold: 第一次处理时使用的阀值，与普通NMS中阀值的用法一致
+ * fast_mode: True, 表示结果中box较少时，会简单的从前到后添加已经标记为删除的box, 否则会使用一种启发式的方式添加（规则类似于soft-nms)
  * output_box:[Y,4]
  * output_classes:[Y]
  * output_indices:[X]
@@ -530,6 +532,7 @@ REGISTER_OP("BoxesNmsNr2")
 	.Attr("classes_wise:bool")
 	.Attr("k:int")
 	.Attr("threshold:float")
+	.Attr("fast_mode:bool")
     .Input("bottom_box: T")
     .Input("classes:int32")
     .Input("confidence:T")
@@ -561,6 +564,7 @@ class BoxesNmsNr2Op: public OpKernel {
 		explicit BoxesNmsNr2Op(OpKernelConstruction* context) : OpKernel(context) {
 			OP_REQUIRES_OK(context, context->GetAttr("classes_wise", &classes_wise_));
 			OP_REQUIRES_OK(context, context->GetAttr("threshold", &threshold_));
+			OP_REQUIRES_OK(context, context->GetAttr("fast_mode", &fast_mode_));
 			OP_REQUIRES_OK(context, context->GetAttr("k", &k_));
             if(k_ <= 0) k_ = 1;
 		}
@@ -604,35 +608,58 @@ class BoxesNmsNr2Op: public OpKernel {
 			auto out_size = count(keep_mask.begin(),keep_mask.end(),true);
 
             if(out_size<k_) {
-                auto delta = k_-out_size;
-                vector<InterData> datas;
-                datas.reserve((data_nr-out_size)/2);
-
-                for(auto it=keep_mask.begin(); it!=keep_mask.end(); ++it) 
-                    if((*it) == false) {
-                        auto index = std::distance(keep_mask.begin(),it);
-                        auto score = confidence_flat.data()[index];
-                        for(auto kt=keep_mask.begin(); kt != it; ++kt) {
-                            if((*kt) == false) 
-                                continue;
-                            auto index0 = std::distance(keep_mask.begin(),kt);
-                            auto iou = bboxes_jaccard(bottom_box_flat+index*4,bottom_box_flat+index0*4);
-                            score *= (1.0-iou);
+                /*
+                 * 处理返回的box过少的情况
+                 */
+                if(fast_mode_) {
+                    /*
+                     * 快速模式，从前往后加入已经删除的box
+                     */
+                    auto nr = k_-out_size;
+                    for(auto it = keep_mask.begin(); it!=keep_mask.end(); ++it) {
+                        if((*it) == false) {
+                            *it = true;
+                            --nr;
+                            if(0 == nr) break;
                         }
-                        datas.emplace_back(int(index),score);
                     }
-                for(auto x=0; x<delta; ++x) {
-                    auto jt = max_element(datas.begin(),datas.end());
-                    const auto index = jt->index;
-                    keep_mask[jt->index] = true;
-                    datas.erase(jt);
-                    for(auto jt=datas.begin(); jt!=datas.end(); ++jt) {
-                        auto index0 = jt->index;
-                        auto iou = bboxes_jaccard(bottom_box_flat+index*4,bottom_box_flat+index0*4);
-                        jt->score *= (1.0-iou);
+                } else {
+                    /*
+                     * 使用启发的方式添加box
+                     */
+                    auto delta = k_-out_size;
+                    vector<InterData> datas;
+                    datas.reserve((data_nr-out_size)/2);
+
+                    for(auto it=keep_mask.begin(); it!=keep_mask.end(); ++it) 
+                        if((*it) == false) {
+                            auto index = std::distance(keep_mask.begin(),it);
+                            auto score = confidence_flat.data()[index];
+                            for(auto kt=keep_mask.begin(); kt != it; ++kt) {
+                                if((*kt) == false) 
+                                    continue;
+                                auto index0 = std::distance(keep_mask.begin(),kt);
+                                auto iou = bboxes_jaccard(bottom_box_flat+index*4,bottom_box_flat+index0*4);
+                                score *= (1.0-iou);
+                            }
+                            datas.emplace_back(int(index),score);
+                        }
+                    for(auto x=0; x<delta; ++x) {
+                        auto jt = max_element(datas.begin(),datas.end());
+                        const auto index = jt->index;
+                        keep_mask[jt->index] = true;
+                        datas.erase(jt);
+                        for(auto jt=datas.begin(); jt!=datas.end(); ++jt) {
+                            auto index0 = jt->index;
+                            auto iou = bboxes_jaccard(bottom_box_flat+index*4,bottom_box_flat+index0*4);
+                            jt->score *= (1.0-iou);
+                        }
                     }
                 }
-          } else if(out_size>k_) {
+            } else if(out_size>k_) {
+              /*
+               * 如果返回的box过多，简单的从后往前删除多余的box
+               */
                 auto nr = out_size-k_;
                 for(auto it = keep_mask.rbegin(); it!=keep_mask.rend(); ++it) {
                     if((*it) == true) {
@@ -693,6 +720,7 @@ class BoxesNmsNr2Op: public OpKernel {
 		bool  classes_wise_ = true;
 		float threshold_    = 0.0;
 		int   k_            = 0;
+		bool  fast_mode_    = false;
 };
 REGISTER_KERNEL_BUILDER(Name("BoxesNmsNr2").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesNmsNr2Op<CPUDevice, float>);
 /*

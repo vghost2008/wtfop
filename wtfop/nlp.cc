@@ -181,7 +181,12 @@ REGISTER_OP("PlanePositionEmbedding")
     .Attr("T: {int32, int64}")
 	.Attr("ref_size:list(int)")
     .Input("size: T")
-	.Output("output:float");
+	.Output("output:float")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+            auto output_shape = c->MakeShape({1, -1,-1});
+			c->set_output(0, output_shape);
+			return Status::OK();
+			});
 
 template <typename Device, typename T>
 class PlanePositionEmbeddingOp: public OpKernel {

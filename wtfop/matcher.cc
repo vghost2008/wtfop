@@ -161,6 +161,12 @@ class MatcherOp<GPUDevice,T>: public OpKernel {
 			const Tensor &_bottom_gboxes  = context->input(1);
 			const Tensor &_bottom_glabels = context->input(2);
 			const Tensor &_bottom_gsize   = context->input(3);
+
+			OP_REQUIRES(context, _bottom_boxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
+			OP_REQUIRES(context, _bottom_gboxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
+			OP_REQUIRES(context, _bottom_glabels.dims() == 2, errors::InvalidArgument("labels data must be 2-dimensional"));
+			OP_REQUIRES(context, _bottom_gsize.dims() == 1, errors::InvalidArgument("gsize data must be 1-dimensional"));
+
 			auto          bottom_boxes    = _bottom_boxes.template tensor<T,3>();
 			auto          bottom_gboxes   = _bottom_gboxes.template tensor<T,3>();
 			auto          bottom_glabels  = _bottom_glabels.template tensor<int,2>();
@@ -170,10 +176,6 @@ class MatcherOp<GPUDevice,T>: public OpKernel {
 		    Eigen::Tensor<int,1,Eigen::RowMajor> bottom_gsize;
             assign_tensor<CPUDevice,GPUDevice>(bottom_gsize,d_bottom_gsize);
 
-			OP_REQUIRES(context, _bottom_boxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
-			OP_REQUIRES(context, _bottom_gboxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
-			OP_REQUIRES(context, _bottom_glabels.dims() == 2, errors::InvalidArgument("labels data must be 2-dimensional"));
-			OP_REQUIRES(context, _bottom_gsize.dims() == 1, errors::InvalidArgument("gsize data must be 1-dimensional"));
 
 			int           dims_2d[2]            = {int(batch_size),int(data_nr)};
 			TensorShape   outshape1;

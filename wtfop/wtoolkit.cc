@@ -98,12 +98,12 @@ class DrawPointsOp: public OpKernel {
 };
 REGISTER_KERNEL_BUILDER(Name("DrawPoints").Device(DEVICE_CPU).TypeConstraint<float>("T"), DrawPointsOp<CPUDevice, float>);
 /*
- * phy_max:返回的begin_index与end_index之间最多差phy_max
+ * phy_max:返回的begin_index与end_index之间最多差phy_max(强制限制)
  * max：begin_index,end_index的最大值，
- * hint:提示值，生成的区间至少要包含hint中的一个值
+ * hint:提示值，生成的区间至少要包含hint中的一个值, 要求其值位于[0,max)之间
  * 输出:
- * [begin_index,end_index)
- * hint:输入的hint中在[begin_index,end_index之间的部分
+ * oindex:[begin_index,end_index) shape=[2]的tensor用于表示一个范围
+ * ohint:输入的hint中在[begin_index,end_index之间的部分
  */
 REGISTER_OP("RandomRange")
 	.Attr("phy_max:int")
@@ -845,3 +845,106 @@ class FillBoxesOp: public OpKernel {
 
 };
 REGISTER_KERNEL_BUILDER(Name("FillBBoxes").Device(DEVICE_CPU).TypeConstraint<float>("T"), FillBoxesOp<CPUDevice, float>);
+
+/*
+ * 在data最后一维为True的位置随机选择出nr个,并将其它的设置为False
+ * data: [D0,D1,...,Dn] a bool tensor
+ * indices:[D0,D1,...,nr] 与返回值相对应的indices
+ */
+REGISTER_OP("RandomSelect")
+    .Attr("nr: int")
+    .Attr("sort_indices: bool = False")
+    .Input("data: bool")
+	.Output("output:bool")
+	.Output("indices:int32")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+            auto input_shape0 = c->input(0);
+            const auto dims = c->Rank(input_shape0);
+            int nr;
+
+            c->GetAttr("nr",&nr);
+
+            shape_inference::ShapeHandle tmp_shape0;
+            shape_inference::ShapeHandle tmp_shape1 = c->MakeShape({nr});
+            shape_inference::ShapeHandle output_shape1;
+
+            c->Subshape(input_shape0,0,-1,&tmp_shape0);
+            c->Concatenate(tmp_shape0,tmp_shape1,&output_shape1);
+			c->set_output(0, input_shape0);
+			c->set_output(1, output_shape1);
+			return Status::OK();
+			});
+
+template <typename Device>
+class RandomSelectOp: public OpKernel {
+	public:
+		explicit RandomSelectOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("nr", &nr_));
+			OP_REQUIRES_OK(context, context->GetAttr("sort_indices", &sort_indices_));
+		}
+
+		void Compute(OpKernelContext* context) override
+		{
+            const Tensor &_tensor        = context->input(0);
+            auto          tensor         = _tensor.template flat<bool>().data();
+            auto          dim_nr         = _tensor.dims();
+            const auto    block_size     = _tensor.dim_size(dim_nr-1);
+            const auto    total_nr       = _tensor.NumElements()/block_size;
+
+
+            Tensor* output_data = NULL;
+            Tensor* output_indices = NULL;
+            TensorShape output_shape1 = _tensor.shape();
+
+            output_shape1.set_dim(dim_nr-1,nr_);
+
+			OP_REQUIRES(context, _tensor.dims() >= 1, errors::InvalidArgument("data must be at lest 1-dimensional"));
+            OP_REQUIRES_OK(context, context->allocate_output(0, _tensor.shape(), &output_data));
+            OP_REQUIRES_OK(context, context->allocate_output(1, output_shape1, &output_indices));
+
+
+            auto       oq_tensor    = output_data->template flat<bool>().data();
+            auto       oi_tensor    = output_indices->template flat<int>().data();
+            const auto kMaxThreadNr = 40;
+            std::vector<std::future<void>> res;
+
+            output_indices->template flat<int>().setZero();
+            copy(tensor,tensor+_tensor.NumElements(),oq_tensor);
+
+            for(auto i=0; i<total_nr; ++i) {
+                res.emplace_back(std::move(std::async(std::launch::async,[this,oq_tensor,oi_tensor,i,block_size](){
+                                process_one_block(oq_tensor+i*block_size,oi_tensor+i*nr_,block_size);
+                                })));
+                if(res.size()>kMaxThreadNr)
+                    res.clear();
+            }
+            res.clear();
+		}
+        void process_one_block(bool* data,int* o_indices,int size)const {
+            vector<int> indices;
+            indices.reserve(nr_*2);
+            for(auto i=0; i<size; ++i){
+                if(data[i])
+                    indices.push_back(i);
+            }
+            if(indices.size()>=nr_) {
+                std::random_shuffle(indices.begin(),indices.end());
+                for(auto i=nr_; i<indices.size(); ++i) {
+                    data[indices[i]] = false;
+                }
+            } 
+            const auto nr = std::min<int>(nr_,indices.size());
+
+            if(sort_indices_)
+                std::sort(indices.begin(),std::next(indices.begin(),nr));
+
+            for(auto i=0; i<nr; ++i) {
+                o_indices[i] = indices[i];
+            }
+        }
+	private:
+        int  nr_           = 1;
+        bool sort_indices_ = false;
+
+};
+REGISTER_KERNEL_BUILDER(Name("RandomSelect").Device(DEVICE_CPU), RandomSelectOp<CPUDevice>);

@@ -373,6 +373,26 @@ class WTFOPTest(tf.test.TestCase):
             wmlu.show_nparray(index)
             wmlu.show_nparray(lens)
 
+    def test_random_select(self):
+        with self.test_session() as sess:
+            print("test random_select")
+            a = tf.constant([[True,True,False,True,True],[True,True,False,True,False],[True,True,True,True,True]]);
+            b,c = wop.random_select(a,nr=3)
+            a,b,c = sess.run([a,b,c])
+            print(a)
+            print(b)
+            print(c)
+
+    def test_random_select1(self):
+        with self.test_session() as sess:
+            print("test random_select (sort indices)")
+            a = tf.constant([[True,True,False,True,True],[True,True,False,True,False],[True,True,True,True,True]]);
+            b,c = wop.random_select(a,nr=3,sort_indices=True)
+            a,b,c = sess.run([a,b,c])
+            print(a)
+            print(b)
+            print(c)
+
 if __name__ == "__main__":
     random.seed(int(time.time()))
     tf.test.main()

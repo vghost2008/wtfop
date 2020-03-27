@@ -14,6 +14,7 @@ inline void default_log_func(const std::string& v)
         WTimeThis(const std::string& name,std::function<void(const std::string&)> func=default_log_func,bool autolog=true)
             :name_(name),func_(func),t_(std::chrono::steady_clock::now()),autolog_(autolog)
             {
+                func_(name_);
             }
         ~WTimeThis() {
             if(autolog_)
