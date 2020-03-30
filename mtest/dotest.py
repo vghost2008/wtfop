@@ -480,6 +480,58 @@ class WTFOPTest(tf.test.TestCase):
             res = sess.run(res)
             self.assertAllClose(res,target_points,atol=1e-3)
 
+    def test_full_size_mask(self):
+        with self.test_session() as sess:
+            mask = np.array([[[1, 1], [1, 1]], [[1, 0], [1, 0]], [[1, 0], [1, 0]]])
+            boxes = np.array([[0, 0, 1, 0.5], [0, 0, 0.5, 0], [0, 0, 0.5, 1]])
+            mask = tf.constant(mask, dtype=tf.uint8)
+            boxes = tf.constant(boxes, dtype=tf.float32)
+            mask = wop.full_size_mask(mask=mask, bboxes=boxes, size=[4, 4])
+            sess.run(tf.global_variables_initializer())
+            res = sess.run(mask)
+            target = [[[1,1,0,0],
+            [1,1,0,0],
+            [1,1,0,0],
+            [1,1,0,0]]
+            ,
+            [[0,0,0,0],
+            [0,0,0,0],
+            [0,0,0,0],
+            [0,0,0,0]]
+            ,
+            [[1,1,0,0],
+            [1,1,0,0],
+            [0,0,0,0],
+            [0,0,0,0]]
+            ]
+            self.assertAllClose(res,target,atol=1e-4)
+
+    def test_full_size_mask2(self):
+        with self.test_session() as sess:
+            mask = np.array([[[1, 1], [1, 1]], [[1, 0], [1, 0]], [[1, 0], [1, 0]]])
+            boxes = np.array([[0, 0, 1, 0.5], [0, 0, 0.5, 0], [0, 0, 0.5, 1]])
+            mask = tf.constant(mask, dtype=tf.float32)
+            boxes = tf.constant(boxes, dtype=tf.float32)
+            mask = wop.full_size_mask(mask=mask, bboxes=boxes, size=[4, 4])
+            sess.run(tf.global_variables_initializer())
+            res = sess.run(mask)
+            target = [[[1.0,1.0,0.0,0.0],
+            [1.0,1.0,0.0,0.0],
+            [1.0,1.0,0.0,0.0],
+            [1.0,1.0,0.0,0.0]]
+            ,
+            [[0.0,0.0,0.0,0.0],
+            [0.0,0.0,0.0,0.0],
+            [0.0,0.0,0.0,0.0],
+            [0.0,0.0,0.0,0.0]]
+            ,
+            [[1.0,0.75,0.25,0.0],
+            [1.0,0.75,0.25,0.0],
+            [0.0,0.0,0.0,0.0],
+            [0.0,0.0,0.0,0.0]]
+            ]
+            self.assertAllClose(res,target,atol=1e-4)
+
 if __name__ == "__main__":
     random.seed(int(time.time()))
     tf.test.main()

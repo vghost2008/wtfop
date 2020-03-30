@@ -259,22 +259,27 @@ class FullSizeMaskOp: public OpKernel {
             auto o_tensor = output_mask->template tensor<T,3>();
             const auto H_max = H-1;
             const auto W_max = W-1;
+            constexpr auto kMinSize = 1e-3;
 
             for(auto i=0; i<data_nr; ++i) {
+                if((fabs(bboxes(i,3)-bboxes(i,1))<kMinSize)
+                    || (fabs(bboxes(i,2)-bboxes(i,0))<kMinSize))
+                    continue;
+
                 long xmin = ba::clamp(bboxes(i,1)*W_max,0,W_max);
                 long ymin = ba::clamp(bboxes(i,0)*H_max,0,H_max);
                 long xmax = ba::clamp(bboxes(i,3)*W_max,0,W_max);
                 long ymax = ba::clamp(bboxes(i,2)*H_max,0,H_max);
-                Eigen::array<long,3> offset = {long(i),ymin,xmin};
-                Eigen::array<long,3> extents = {long(i+1),ymax+1,xmax+1};
+                Eigen::array<long,2> offset = {ymin,xmin};
+                Eigen::array<long,2> extents = {ymax+1,xmax+1};
                 const cv::Mat input_mask(mh,mw,bm::at<type_to_int,T>::type::value,(void*)(mask.data()+i*mh*mw));
                 cv::Mat dst_mask(ymax-ymin+1,xmax-xmin+1,bm::at<type_to_int,T>::type::value);
 
                 cv::resize(input_mask,dst_mask,cv::Size(xmax-xmin+1,ymax-ymin+1));
 
-                tensor_map_t src_map((T*)dst_mask.data,dst_mask.rows,dst_mask.rows);
+                tensor_map_t src_map((T*)dst_mask.data,dst_mask.rows,dst_mask.cols);
 
-                o_tensor.slice(offset,extents) = src_map;
+                o_tensor.chip(i,0).slice(offset,extents) = src_map;
             }
 		}
 };

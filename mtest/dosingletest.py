@@ -7,18 +7,15 @@ import image_visualization as imv
 import cv2
 import wml_utils as wmlu
 
-img_files = []
-for i in range(6):
-    img_files.append(f"./imgs/img{i}.jpg")
-img = []
-for f in img_files:
-    img.append(wmli.nprgb_to_gray(wmli.imread(f)).astype(np.uint8))
-imgs = np.stack(img,axis=0)
 
-res = wop.min_area_rect(imgs,res_points=False)
+mask = np.array([[[1,1],[1,1]],[[1,0],[1,0]],[[1,0],[1,0]]])
+boxes = np.array([[0,0,1,0.5],[0,0,0.5,0],[0,0,0.5,1]])
+mask = tf.constant(mask,dtype=tf.float32)
+boxes = tf.constant(boxes,dtype=tf.float32)
+mask = wop.full_size_mask(mask=mask,bboxes=boxes,size=[4,4])
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
-res = sess.run(res)
+res = sess.run(mask)
 print(res)
 wmlu.show_nparray(res)
 

@@ -13,7 +13,7 @@ TF_LIB = $(shell python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib(
 #CXXFLAGS = -I ${TF_INC} -fPIC -L${TF_LIB} -ltensorflow_framework -D_GLIBCXX_USE_CXX11_ABI
 CXX11_ABI=0
 OPT = -O3
-#OPT = -g
+OPT = -g
 CUDA_OPT = -O0
 CXXFLAGS = -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared ${OPT} -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -fPIC -L${TF_LIB} -ltensorflow_framework `pkg-config --cflags opencv` `pkg-config --libs opencv`
 #CUDAFLAGS = -std=c++14 -g -shared -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=0 -DGOOGLE_CUDA --expt-relaxed-constexpr -Xcompiler="-fPIC"
