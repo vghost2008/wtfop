@@ -905,37 +905,46 @@ class RandomSelectOp: public OpKernel {
 
             auto       oq_tensor    = output_data->template flat<bool>().data();
             auto       oi_tensor    = output_indices->template flat<int>().data();
-            const auto kMaxThreadNr = 40;
+            const auto kMaxThreadNr = 100;
             std::vector<std::future<void>> res;
+            const auto kDataNrPerThread = 20000;
+            const auto kBatchSizePerThread = std::max<int>(1,kDataNrPerThread/block_size);
 
             output_indices->template flat<int>().setZero();
             copy(tensor,tensor+_tensor.NumElements(),oq_tensor);
 
-            for(auto i=0; i<total_nr; ++i) {
-                res.emplace_back(std::move(std::async(std::launch::async,[this,oq_tensor,oi_tensor,i,block_size](){
-                                process_one_block(oq_tensor+i*block_size,oi_tensor+i*nr_,block_size);
-                                })));
+            for(auto i=0; i<total_nr; i+=kBatchSizePerThread) {
+                res.emplace_back(std::move(std::async(std::launch::async,
+                                process_one_batch,oq_tensor+i*block_size,oi_tensor+i*nr_,
+                                std::min<int>(kBatchSizePerThread,total_nr-i),
+                                block_size,nr_,sort_indices_
+                                )));
                 if(res.size()>kMaxThreadNr)
                     res.clear();
             }
             res.clear();
 		}
-        void process_one_block(bool* data,int* o_indices,int size)const {
+        static void process_one_batch(bool* data,int* o_indices,int batch_size,int size,int nr,bool sort_indices){
+            for(auto i=0; i<batch_size; ++i) {
+                 process_one_block(data+i*size,o_indices+i*nr,size,nr,sort_indices);
+            }
+        }
+        static void process_one_block(bool* data,int* o_indices,int size,int nr,bool sort_indices){
             vector<int> indices;
-            indices.reserve(nr_*2);
+            indices.reserve(nr*2);
             for(auto i=0; i<size; ++i){
                 if(data[i])
                     indices.push_back(i);
             }
-            if(indices.size()>=nr_) {
+            if(indices.size()>=nr) {
                 std::random_shuffle(indices.begin(),indices.end());
-                for(auto i=nr_; i<indices.size(); ++i) {
+                for(auto i=nr; i<indices.size(); ++i) {
                     data[indices[i]] = false;
                 }
             } 
-            const auto nr = std::min<int>(nr_,indices.size());
+            nr = std::min<int>(nr,indices.size());
 
-            if(sort_indices_)
+            if(sort_indices)
                 std::sort(indices.begin(),std::next(indices.begin(),nr));
 
             for(auto i=0; i<nr; ++i) {

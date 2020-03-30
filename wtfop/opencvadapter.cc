@@ -161,3 +161,93 @@ class BilateralFilterOp: public OpKernel {
 };
 REGISTER_KERNEL_BUILDER(Name("BilateralFilter").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), MedianBlurOp<CPUDevice, uint8_t>);
 REGISTER_KERNEL_BUILDER(Name("BilateralFilter").Device(DEVICE_CPU).TypeConstraint<float>("T"), BilateralFilterOp<CPUDevice, float>);
+
+/*
+ * image:[N,H,W], 二值图像
+ * 当res_points==True时
+ * return:
+ * [N,4,2] 分别为[[[p0.x,p0.y],[p1.x,p1.y],..[p3.x,p3.y]],[....]]]
+ * 当res_points==False时:
+ * [N,3,2] 分别为[[[center.x,center.y],[width,height],[angle,_]],[.....]]]
+ */
+REGISTER_OP("MinAreaRect")
+    .Attr("T: {uint8}")
+    .Attr("res_points: bool = True")
+    .Input("image: T")
+	.Output("box:float32")
+    .SetShapeFn([](shape_inference::InferenceContext* c){
+            bool res_points = true;
+            c->GetAttr("res_points",&res_points);
+            auto input_shape0 = c->input(0);
+            const auto batch_size = c->Dim(input_shape0,0);
+                auto shape = c->MakeShape({batch_size,res_points?4:3,2});
+                c->set_output(0, shape);
+			return Status::OK();
+            });
+
+template <typename Device, typename T>
+class MinAreaRectOp: public OpKernel {
+    private:
+        using Tensor3D = Eigen::Tensor<T,3,Eigen::RowMajor>;
+        using Tensor4D = Eigen::Tensor<T,4,Eigen::RowMajor>;
+	public:
+		explicit MinAreaRectOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("res_points", &res_points_));
+		}
+		void Compute(OpKernelContext* context) override
+		{
+			const Tensor &_input_image  = context->input(0);
+
+			OP_REQUIRES(context, _input_image.dims() == 3, errors::InvalidArgument("image must be at 3-dimensional"));
+
+            auto         input_image   = _input_image.template flat<T>().data();
+            const auto   batch_size    = _input_image.dim_size(0);
+            const auto   img_height    = _input_image.dim_size(1);
+            const auto   img_width     = _input_image.dim_size(2);
+            const int    dim3d[]       = {batch_size,res_points_?4:3,2};
+            TensorShape  output_shape;
+            Tensor      *output_tensor = nullptr;
+
+            TensorShapeUtils::MakeShape(dim3d,3,&output_shape);
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
+            auto      o_tensor = output_tensor->template tensor<T,3>();
+
+            for(auto i=0; i<batch_size; ++i) {
+                auto rect = getRotatedRect(input_image+i*img_height*img_width,img_height,img_width);
+
+                if(res_points_) {
+                    cv::Point2f P[4];
+                    rect.points(P);
+                    for(auto j=0; j<4; ++j) {
+                        o_tensor(i,j,0) = P[j].x;
+                        o_tensor(i,j,1) = P[j].y;
+                    }
+                } else {
+                    o_tensor(i,0,0) = rect.center.x;
+                    o_tensor(i,0,1) = rect.center.y;
+                    o_tensor(i,1,0) = rect.size.width;
+                    o_tensor(i,1,1) = rect.size.height;
+                    o_tensor(i,2,0) = rect.angle;
+                }
+            }
+        }
+        cv::RotatedRect getRotatedRect(const uint8_t* data,int height,int width)
+        {
+            vector<vector<cv::Point>> contours;
+            vector<cv::Vec4i> hierarchy;
+            const cv::Mat img(height,width,CV_8UC1,(uint8_t*)data);
+            vector<cv::Point> points;
+
+            cv::findContours(img, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE, cv::Point(0,0));
+
+            for (auto &cont:contours) 
+                points.insert(points.end(),cont.begin(),cont.end());
+
+            return  cv::minAreaRect(points);
+        }
+
+	private:
+        bool res_points_ = true;
+};
+REGISTER_KERNEL_BUILDER(Name("MinAreaRect").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), MinAreaRectOp<CPUDevice, uint8_t>);
