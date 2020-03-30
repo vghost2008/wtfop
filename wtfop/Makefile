@@ -29,7 +29,7 @@ targets = mask.o wtfop.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.
 CXXFLAGS += -DGOOGLE_CUDA -DEIGEN_USE_GPU -DEIGEN_USE_THREADS
 CXXFLAGS += -I/usr/local/cuda-9.0/include 
 else
-targets = mask.o wtfop.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o center_net_encode_decode.o opencvadapter.o matcher.o ocr_ops.o deform_conv.o
+targets = mask.o wtfop.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o center_net_encode_decode.o opencvadapter.o matcher.o ocr_ops.o
 endif
 
 bboxes_encode_decode_gpu.o:bboxes_encode_decode_gpu.cu

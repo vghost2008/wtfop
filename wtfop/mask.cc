@@ -8,17 +8,24 @@
 #include <numeric>
 #include <boost/algorithm/clamp.hpp>
 #include <random>
+#include<opencv2/opencv.hpp>
 #include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
 #include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/util/work_sharder.h"
+#include <boost/algorithm/clamp.hpp>
+#include <boost/mpl/map.hpp>
+#include <boost/mpl/int.hpp>
+#include <boost/mpl/at.hpp>
 #include "bboxes.h"
 #include "wtoolkit.h"
 
 using namespace tensorflow;
 using namespace std;
+namespace ba=boost::algorithm;
+namespace bm=boost::mpl;
 
 typedef Eigen::ThreadPoolDevice CPUDevice;
 
@@ -188,3 +195,88 @@ class MaskLineBboxesOp: public OpKernel {
 };
 REGISTER_KERNEL_BUILDER(Name("MaskLineBboxes").Device(DEVICE_CPU).TypeConstraint<int32_t>("T"), MaskLineBboxesOp<CPUDevice,int32_t>);
 REGISTER_KERNEL_BUILDER(Name("MaskLineBboxes").Device(DEVICE_CPU).TypeConstraint<tensorflow::int64>("T"), MaskLineBboxesOp<CPUDevice,tensorflow::int64>);
+
+/*
+ * 
+ * masks:[Nr,h,w]
+ * bboxes:[Nr,4]
+ * size:[2]={H,W}
+ * output_masks:[Nr,H,W]
+ */
+REGISTER_OP("FullSizeMask")
+    .Attr("T: {float32,uint8}")
+    .Input("mask: T")
+    .Input("bboxes: float32")
+    .Input("size: int32")
+	.Output("output_masks:T")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+            const auto nr = c->Value(c->Dim(c->input(0),0));
+            const auto shape0     = c->MakeShape({nr,-1,-1});
+			c->set_output(0, shape0);
+			return Status::OK();
+			});
+
+template <typename Device,typename T>
+class FullSizeMaskOp: public OpKernel {
+    private:
+        using bbox_t = tuple<float,float,float,float>;
+        using type_to_int = bm::map<
+              bm::pair<uint8_t,bm::int_<CV_8UC1>>
+                  , bm::pair<float,bm::int_<CV_32FC1>>
+             >;
+        using tensor_t = Eigen::Tensor<T,2,Eigen::RowMajor>;
+        using tensor_map_t = Eigen::TensorMap<tensor_t>;
+	public:
+		explicit FullSizeMaskOp(OpKernelConstruction* context) : OpKernel(context) {
+		}
+
+		void Compute(OpKernelContext* context) override
+		{
+			const Tensor &_mask= context->input(0);
+			const Tensor &_bboxes = context->input(1);
+			const Tensor &_size= context->input(2);
+
+			OP_REQUIRES(context, _mask.dims() == 3, errors::InvalidArgument("mask data must be 3-dimensional"));
+			OP_REQUIRES(context, _bboxes.dims() == 2, errors::InvalidArgument("bboxes data must be 2-dimensional"));
+			OP_REQUIRES(context, _size.dims() == 1, errors::InvalidArgument("size data must be 1-dimensional"));
+
+			auto         mask        = _mask.template flat<T>();
+			auto         bboxes      = _bboxes.template tensor<float,2>();
+			auto         size        = _size.template tensor<int,1>();
+			const auto   mh          = _mask.dim_size(1);
+			const auto   mw          = _mask.dim_size(2);
+			const auto   H           = size(0);
+			const auto   W           = size(1);
+			const auto   data_nr     = _mask.dim_size(0);
+			int          dims_3d[3]  = {data_nr,H,W};
+			Tensor      *output_mask = NULL;
+			TensorShape  outshape0;
+
+			TensorShapeUtils::MakeShape(dims_3d, 3, &outshape0);
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_mask));
+
+            auto o_tensor = output_mask->template tensor<T,3>();
+            const auto H_max = H-1;
+            const auto W_max = W-1;
+
+            for(auto i=0; i<data_nr; ++i) {
+                long xmin = ba::clamp(bboxes(i,1)*W_max,0,W_max);
+                long ymin = ba::clamp(bboxes(i,0)*H_max,0,H_max);
+                long xmax = ba::clamp(bboxes(i,3)*W_max,0,W_max);
+                long ymax = ba::clamp(bboxes(i,2)*H_max,0,H_max);
+                Eigen::array<long,3> offset = {long(i),ymin,xmin};
+                Eigen::array<long,3> extents = {long(i+1),ymax+1,xmax+1};
+                const cv::Mat input_mask(mh,mw,bm::at<type_to_int,T>::type::value,(void*)(mask.data()+i*mh*mw));
+                cv::Mat dst_mask(ymax-ymin+1,xmax-xmin+1,bm::at<type_to_int,T>::type::value);
+
+                cv::resize(input_mask,dst_mask,cv::Size(xmax-xmin+1,ymax-ymin+1));
+
+                tensor_map_t src_map((T*)dst_mask.data,dst_mask.rows,dst_mask.rows);
+
+                o_tensor.slice(offset,extents) = src_map;
+            }
+		}
+};
+REGISTER_KERNEL_BUILDER(Name("FullSizeMask").Device(DEVICE_CPU).TypeConstraint<float>("T"), FullSizeMaskOp<CPUDevice,float>);
+REGISTER_KERNEL_BUILDER(Name("FullSizeMask").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), FullSizeMaskOp<CPUDevice,uint8_t>);
