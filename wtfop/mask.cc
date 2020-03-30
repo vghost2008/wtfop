@@ -261,6 +261,8 @@ class FullSizeMaskOp: public OpKernel {
             const auto W_max = W-1;
             constexpr auto kMinSize = 1e-3;
 
+            o_tensor.setZero();
+
             for(auto i=0; i<data_nr; ++i) {
                 if((fabs(bboxes(i,3)-bboxes(i,1))<kMinSize)
                     || (fabs(bboxes(i,2)-bboxes(i,0))<kMinSize))
