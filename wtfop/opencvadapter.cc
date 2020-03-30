@@ -211,7 +211,7 @@ class MinAreaRectOp: public OpKernel {
             TensorShapeUtils::MakeShape(dim3d,3,&output_shape);
 
 			OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
-            auto      o_tensor = output_tensor->template tensor<T,3>();
+            auto      o_tensor = output_tensor->template tensor<float,3>();
 
             for(auto i=0; i<batch_size; ++i) {
                 auto rect = getRotatedRect(input_image+i*img_height*img_width,img_height,img_width);
@@ -229,6 +229,7 @@ class MinAreaRectOp: public OpKernel {
                     o_tensor(i,1,0) = rect.size.width;
                     o_tensor(i,1,1) = rect.size.height;
                     o_tensor(i,2,0) = rect.angle;
+                    o_tensor(i,2,1) = 0;
                 }
             }
         }

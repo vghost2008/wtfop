@@ -6,7 +6,7 @@ TF_LIB = $(shell python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib(
 #TF_LIB = $(shell /usr/local/anaconda3/bin/python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib())')
 #TF_LIB = $(shell /home/wj/anaconda3_cpu/bin/python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib())')
 #TF_LIB = "/home/vghost/.local/lib/python3.6/site-packages/tensorflow"
-USE_CUDA := "YES"
+#USE_CUDA := "YES"
 #all: build
 #all: clean build
 #g++ -std=c++14 -shared -g -o $@ $^ -I $(TF_INC) -fPIC -D_GLIBCXX_USE_CXX11_ABI=0 -L${TF_LIB} -ltensorflow_framework 

@@ -32,6 +32,7 @@ lib_path = os.path.join(module_dir, 'wtfop.so')
 print(lib_path)
 wtfop_module = tf.load_op_library(lib_path)
 random_select = wtfop_module.random_select
+min_area_rect = wtfop_module.min_area_rect
 #deform_conv_op = wtfop_module.deform_conv_op
 #deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
 

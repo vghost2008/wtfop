@@ -5,9 +5,11 @@ import wtfop.wtfop_ops as wop
 import object_detection.npod_toolkit as npod
 import numpy as np
 import wml_utils as wmlu
+import img_utils as wmli
 import random
 import time
 import os
+
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 class WTFOPTest(tf.test.TestCase):
@@ -392,6 +394,91 @@ class WTFOPTest(tf.test.TestCase):
             print(a)
             print(b)
             print(c)
+
+    def test_min_area_rect(self):
+        with self.test_session() as sess:
+            target_points = [[[135.99996948242188,262.9999694824219],
+                [135.99996948242188,183.99996948242188],
+                [422.9999084472656,183.99996948242188],
+                [422.9999084472656,262.9999694824219]]
+                ,
+                [[207.5,358.5000305175781],
+                [144.5,295.5000305175781],
+                [351.5,88.50003051757812],
+                [414.5,151.50003051757812]]
+                ,
+                [[48.0,271.0],
+                [48.0,224.0],
+                [471.0,224.0],
+                [471.0,271.0]]
+                ,
+                [[128.5,437.50006103515625],
+                [85.5,394.50006103515625],
+                [391.0,89.00006103515625],
+                [434.0,132.00006103515625]]
+                ,
+                [[240.0,470.99993896484375],
+                [240.0,48.0],
+                [287.0,48.0],
+                [287.0,470.99993896484375]]
+                ,
+                [[395.0,426.0],
+                [89.5,120.5],
+                [132.5,77.5],
+                [438.0,383.0]]
+                ]
+            img_files = []
+            for i in range(6):
+                img_files.append(f"./imgs/img{i}.jpg")
+            img = []
+            for f in img_files:
+                img.append(wmli.nprgb_to_gray(wmli.imread(f)).astype(np.uint8))
+            imgs = np.stack(img, axis=0)
+
+            res = wop.min_area_rect(imgs, res_points=True)
+            sess.run(tf.global_variables_initializer())
+            res = sess.run(res)
+            self.assertAllClose(res,target_points,atol=1e-3)
+
+    def test_min_area_rect1(self):
+        with self.test_session() as sess:
+            target_points = [[[279.49993896484375,223.49996948242188],
+            [286.99993896484375,78.99998474121094],
+            [-0.0,0.0]]
+            ,
+            [[279.5,223.50003051757812],
+            [292.7421875,89.09545135498047],
+            [-45.0,0.0]]
+            ,
+            [[259.5,247.5],
+            [423.0,47.0],
+            [-0.0,0.0]]
+            ,
+            [[259.75,263.25006103515625],
+            [432.042236328125,60.81117630004883],
+            [-45.0,0.0]]
+            ,
+            [[263.5,259.4999694824219],
+            [46.99999237060547,422.99993896484375],
+            [-0.0,0.0]]
+            ,
+            [[263.75,251.75],
+            [60.81117630004883,432.042236328125],
+            [-45.0,0.0]]
+            ]
+            img_files = []
+            for i in range(6):
+                img_files.append(f"./imgs/img{i}.jpg")
+            img = []
+            for f in img_files:
+                img.append(wmli.nprgb_to_gray(wmli.imread(f)).astype(np.uint8))
+            imgs = np.stack(img, axis=0)
+
+            res = wop.min_area_rect(imgs, res_points=False)
+            sess = tf.Session()
+            sess.run(tf.global_variables_initializer())
+            res = sess.run(res)
+            self.assertAllClose(res,target_points,atol=1e-3)
 
 if __name__ == "__main__":
     random.seed(int(time.time()))
