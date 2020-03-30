@@ -270,14 +270,14 @@ class FullSizeMaskOp: public OpKernel {
                 long ymin = ba::clamp(bboxes(i,0)*H_max,0,H_max);
                 long xmax = ba::clamp(bboxes(i,3)*W_max,0,W_max);
                 long ymax = ba::clamp(bboxes(i,2)*H_max,0,H_max);
-                Eigen::array<long,2> offset = {ymin,xmin};
-                Eigen::array<long,2> extents = {ymax+1,xmax+1};
                 const cv::Mat input_mask(mh,mw,bm::at<type_to_int,T>::type::value,(void*)(mask.data()+i*mh*mw));
                 cv::Mat dst_mask(ymax-ymin+1,xmax-xmin+1,bm::at<type_to_int,T>::type::value);
 
                 cv::resize(input_mask,dst_mask,cv::Size(xmax-xmin+1,ymax-ymin+1));
 
                 tensor_map_t src_map((T*)dst_mask.data,dst_mask.rows,dst_mask.cols);
+                Eigen::array<long,2> offset = {ymin,xmin};
+                Eigen::array<long,2> extents = {dst_mask.rows,dst_mask.cols};
 
                 o_tensor.chip(i,0).slice(offset,extents) = src_map;
             }
