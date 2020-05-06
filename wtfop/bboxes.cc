@@ -21,6 +21,7 @@ using namespace tensorflow;
 using namespace std;
 
 typedef Eigen::ThreadPoolDevice CPUDevice;
+namespace ba=boost::algorithm;
 
 /*
  * 
@@ -635,6 +636,7 @@ class RandomDistoredBoxesOp: public OpKernel {
 				cur_box[1] += dx-sdx;
 				cur_box[2] += dy+sdy;
 				cur_box[3] += dx+sdx;
+                ba::clamp_range(cur_box,cur_box+4,cur_box,0.0f,1.0f);
             }
 		}
 	private:

@@ -642,6 +642,7 @@ REGISTER_KERNEL_BUILDER(Name("WPad").Device(DEVICE_CPU).TypeConstraint<int32_t>(
 REGISTER_KERNEL_BUILDER(Name("WPad").Device(DEVICE_CPU).TypeConstraint<float>("T"), WPadOp<CPUDevice, float>);
 
 /*
+ * 设置多个子tensor的值
  * 输入tensor [X,Y,Z,...,M,N,..]tensor
  * 输入v[M,N,...] tensor
  * 输入index[num]，依次表示[X,Y,Z,...]维度的值
@@ -649,7 +650,7 @@ REGISTER_KERNEL_BUILDER(Name("WPad").Device(DEVICE_CPU).TypeConstraint<float>("T
  * example:
  * tensor shape=[2,3,4,2,2]
  * v shape=[2,2]
- * index=[0,1,3]
+ * index=[[0,1,3]]
  * 那么tensor[0,1,3]=v
  */
 REGISTER_OP("SetValue")

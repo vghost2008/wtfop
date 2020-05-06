@@ -275,7 +275,7 @@ class FullSizeMaskOp: public OpKernel {
                 const cv::Mat input_mask(mh,mw,bm::at<type_to_int,T>::type::value,(void*)(mask.data()+i*mh*mw));
                 cv::Mat dst_mask(ymax-ymin+1,xmax-xmin+1,bm::at<type_to_int,T>::type::value);
 
-                cv::resize(input_mask,dst_mask,cv::Size(xmax-xmin+1,ymax-ymin+1));
+                cv::resize(input_mask,dst_mask,cv::Size(xmax-xmin+1,ymax-ymin+1),0,0,CV_INTER_LINEAR);
 
                 tensor_map_t src_map((T*)dst_mask.data,dst_mask.rows,dst_mask.cols);
                 Eigen::array<long,2> offset = {ymin,xmin};

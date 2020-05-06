@@ -112,6 +112,10 @@ class MergeCharacterOp: public OpKernel {
             super_boxes = merge_super_bboxes(super_boxes);
             finetune_super_boxes(super_boxes,bboxes,labels);
             /*
+             * 经过上面的处理后可能会出现一些错误的super_boxes
+             */
+            super_boxes = remove_bad_super_bboxes(super_boxes,bboxes,labels,dlabels);
+            /*
              * 确定整个标签的方向，大多数时候一个标签中只有一个文字方向, 这里用于确定词的顺序
              */
             const auto    is_h  = is_horizontal_text(super_boxes,dlabels);
@@ -122,7 +126,7 @@ class MergeCharacterOp: public OpKernel {
                 return;
             }
 
-            auto  bboxes_type = get_bboxes_type(super_boxes,bboxes,labels);
+            auto  bboxes_type = get_bboxes_type(super_boxes,bboxes,labels,dlabels);
             vector<word_t> words;
 
             for(auto i=0; i<super_boxes.size(); ++i) {
@@ -347,7 +351,7 @@ class MergeCharacterOp: public OpKernel {
                  */
                 env_bbox0(0) = miny;
                 env_bbox0(1) = minx;
-                env_bbox0(2) = maxx;
+                env_bbox0(2) = maxy;
                 env_bbox0(3) = minx+(maxx-minx)/2.0;
                 env_bbox1(0) = miny;
                 env_bbox1(1) = minx+(maxx-minx)/2.0;
@@ -374,12 +378,12 @@ class MergeCharacterOp: public OpKernel {
                 if((iou0<0.33) && (iou1>0.67))
                     ++error_count;
             }
-            if(error_count>infos.size()/3) return false;
+            if(error_count>=3) return false;
             return true;
         }
         template<typename BT,typename LT>
         vector<bbox_t> remove_bad_super_bboxes(const vector<bbox_t>& super_boxes,const BT& bboxes,const LT& labels,const LT& dlabels) {
-            auto  bboxes_type = get_bboxes_type(super_boxes,bboxes,labels);
+            auto  bboxes_type = get_bboxes_type(super_boxes,bboxes,labels,dlabels);
             const auto data_nr = labels.dimension(0);
             vector<bbox_t> res;
 
@@ -404,7 +408,7 @@ class MergeCharacterOp: public OpKernel {
          * 确定boxes所属的super_box, 返回值中为super_boxes的序号
          */
         template<typename BT,typename LT>
-            vector<int> get_bboxes_type(const vector<bbox_t>& super_boxes,const BT& bboxes,const LT& labels) {
+            vector<int> get_bboxes_type(const vector<bbox_t>& super_boxes,const BT& bboxes,const LT& labels,const LT& dlabels) {
                 const auto data_nr = labels.dimension(0);
                 vector<float> bbox_iou;
                 vector<int>   bboxes_type(size_t(data_nr),-1);
@@ -441,8 +445,13 @@ class MergeCharacterOp: public OpKernel {
 
                     bbox_iou.clear();
                     for(auto sbbox:super_boxes) {
-                        const auto iou_v = iou(sbbox,cur_bbox,is_horizontal(sbbox));
-                        bbox_iou.emplace_back(iou_v);
+                        try {
+                            const auto is_h = is_horizontal(sbbox,bbox_iou.size(),bboxes_type,bboxes,dlabels);
+                            const auto iou_v = iou(sbbox,cur_bbox,is_h);
+                            bbox_iou.emplace_back(iou_v);
+                        } catch(...) {
+                            bbox_iou.emplace_back(0);
+                        }
                     }
                     if(bbox_iou.empty()) continue;
 
@@ -564,6 +573,16 @@ class MergeCharacterOp: public OpKernel {
         }
         static inline bool is_horizontal(int dlabel) {
             return (dlabel==0)||(dlabel==2);
+        }
+        template<typename BT,typename LT>
+        static inline bool is_horizontal(const bbox_t& box,int box_idx,const vector<int>& boxes_type,const BT& bboxes,const LT& dlabels) {
+            const auto nr = count(boxes_type.begin(),boxes_type.end(),box_idx);
+            if(nr == 0)
+                throw std::runtime_error("get is hor faild.");
+            if(nr>=3)
+                return is_horizontal(box);
+            auto it = find(boxes_type.begin(),boxes_type.end(),box_idx);
+            return is_horizontal(dlabels(std::distance(boxes_type.begin(),it)));
         }
         bbox_t merge_bbox(const bbox_t& lhv,const bbox_t& rhv) {
             auto ymin = std::min(lhv(0),rhv(0));
@@ -1082,7 +1101,7 @@ class SimpleMergeCharacterOp: public OpKernel {
             for(auto i=0; i<10; ++i) {
                 text_dict_[char('0'+i)] = index++;
             }
-            map<char,char> trans={{'o','0'},{'O','0'},{'l','1'}};
+            map<char,char> trans={{'o','0'},{'O','0'},{'D','0'},{'l','1'}};
             for(auto it=trans.begin(); it!=trans.end(); ++it) {
                 auto i0 = text_dict_[it->first];
                 auto i1 = text_dict_[it->second];

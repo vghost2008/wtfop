@@ -45,4 +45,9 @@ template<typename T>
 __device__ inline bool cuda_is_cross_boundaries(const T* box) {
     return (box[0]<0.0) || (box[1]<0.0) || (box[2]>1.0) ||(box[3]>1.0);
 }
+/*
+ * jaccard: (data_nr-1)*data_nr/2
+ */
+void boxes_pair_jaccard(const float* bboxes,float* jaccard,int data_nr);
+void boxes_pair_jaccard_gpu_mem(const float* bboxes,float* jaccard,int data_nr);
 #endif

@@ -283,4 +283,32 @@ void bboxes_decode_by_gpu(const float* anchor_bboxes,const float* regs,const flo
     CHECK_CUDA_ERRORS(cudaPeekAtLastError());
     cudaDeviceSynchronize(); 
 }
+__global__ void boxes_pair_jaccard_kernel(const float* bboxes, float* jaccard, int data_nr)
+{
+    const auto index     = threadIdx.x+blockIdx.x *blockDim.x;
+    const auto src_index = index/data_nr;
+    const auto dst_index = index%data_nr;
+
+    if(index>= data_nr*data_nr)
+        return;
+
+    jaccard[index] = cuda_bboxes_jaccard(bboxes+(src_index<<2),bboxes+(dst_index<<2));
+}
+void boxes_pair_jaccard(const float* _bboxes,float* _jaccard,int data_nr)
+{
+    auto bboxes = make_cuda_unique(_bboxes,data_nr);
+    auto jaccard = make_cuda_unique<float>(data_nr*data_nr);
+
+    boxes_pair_jaccard_gpu_mem(bboxes.get(),jaccard.get(),data_nr);
+
+    CHECK_OK(cudaMemcpy(_jaccard,jaccard.get(),data_nr*data_nr*sizeof(float),cudaMemcpyDeviceToHost));
+}
+void boxes_pair_jaccard_gpu_mem(const float* bboxes,float* jaccard,int data_nr)
+{
+    const auto grid_size = (data_nr*data_nr+kBlockSize-1)/kBlockSize;
+
+    boxes_pair_jaccard_kernel<<<data_nr,kBlockSize>>>(bboxes,jaccard,data_nr);
+
+    cudaDeviceSynchronize(); 
+}
 #endif

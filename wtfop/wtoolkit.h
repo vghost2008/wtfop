@@ -3,6 +3,8 @@
 #include <chrono>
 #include <sstream>
 #include <iostream>
+#include <future>
+#include <list>
  
 inline void default_log_func(const std::string& v)
  {
@@ -60,3 +62,27 @@ typename T::Scalar* chip_data(const T& v,int offset)
 #define CTIME_THIS() WTimeThis tt__(std::string(__func__)+":"+std::to_string(__LINE__)+":"+__FILE__)
 #define CTIME_THISV1(x) WTimeThis tt__(x)
 
+template<typename Func>
+void par_for_each(long begin,long end,long block_size,Func func) {
+    if(end-begin<block_size)
+        return func(begin,end);
+    block_size = (end-begin)/long((end-begin+block_size-1)/block_size);
+    std::list<std::future<void>> futures;
+    for(auto i=begin; i<end; i+=block_size) {
+       futures.emplace_back(std::move(std::async(std::launch::async,func,i,std::min<long>(i+block_size,end)))); 
+    }
+    futures.clear();
+}
+template<typename Pool,typename Func>
+void par_for_each(Pool& pool,long begin,long end,long block_size,Func func) {
+    if(end-begin<block_size/3)
+        return func(begin,end);
+    if(end-begin<block_size) {
+       pool.schedule([&](){func(begin,end);}); 
+       return;
+    }
+    block_size = (end-begin)/long((end-begin+block_size-1)/block_size);
+    for(auto i=begin; i<end; i+=block_size) {
+       pool.schedule([&](){ func(i,std::min<long>(i+block_size,end));}); 
+    }
+}

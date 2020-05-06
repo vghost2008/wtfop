@@ -196,7 +196,7 @@ template<typename T>
     return cuda_unique_ptr<T>(p,CudaDelete<T>());
 }
 template<typename T>
- cuda_unique_ptr<T> make_cuda_unique(unsigned char v,size_t size=1)
+ cuda_unique_ptr<T> make_cuda_unique(unsigned char v,size_t size)
 {
     T* p = nullptr;
     CHECK_OK(cudaMalloc((T**)&p,sizeof(T)*size));
