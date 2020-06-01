@@ -15,11 +15,15 @@
 #include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/util/work_sharder.h"
 #include <opencv2/opencv.hpp>
+#include <boost/mpl/map.hpp>
+#include <boost/mpl/int.hpp>
+#include <boost/mpl/at.hpp>
 #include "bboxes.h"
 #include "wtoolkit.h"
 
 using namespace tensorflow;
 using namespace std;
+namespace bm=boost::mpl;
 
 typedef Eigen::ThreadPoolDevice CPUDevice;
 
@@ -252,3 +256,66 @@ class MinAreaRectOp: public OpKernel {
         bool res_points_ = true;
 };
 REGISTER_KERNEL_BUILDER(Name("MinAreaRect").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), MinAreaRectOp<CPUDevice, uint8_t>);
+
+
+/*
+ * 对输入image[H,W,C] C=1 or C=3 旋转任意角度
+ */
+REGISTER_OP("TensorRotate")
+    .Attr("T: {uint8,float}")
+    .Input("image: T")
+    .Input("angle: float")
+	.Output("o_image:T")
+    .SetShapeFn([](shape_inference::InferenceContext* c){
+            auto input_shape0 = c->input(0);
+            c->set_output(0, input_shape0);
+			return Status::OK();
+            });
+
+template <typename Device, typename T>
+class TensorRotateOp: public OpKernel {
+    private:
+        using Tensor3D = Eigen::Tensor<T,3,Eigen::RowMajor>;
+        using type_to_int_c1 = bm::map<
+              bm::pair<uint8_t,bm::int_<CV_8UC1>>
+                  , bm::pair<float,bm::int_<CV_32FC1>>
+             >;
+        using type_to_int_c3 = bm::map<
+              bm::pair<uint8_t,bm::int_<CV_8UC3>>
+                  , bm::pair<float,bm::int_<CV_32FC3>>
+             >;
+	public:
+		explicit TensorRotateOp(OpKernelConstruction* context) : OpKernel(context) {
+		}
+		void Compute(OpKernelContext* context) override
+		{
+			const Tensor &_input_img = context->input(0);
+			const Tensor &_angle     = context->input(1);
+
+			OP_REQUIRES(context, _input_img.dims() == 3, errors::InvalidArgument("tensor must be a 3-dimensional tensor"));
+			OP_REQUIRES(context, _angle.dims() == 0, errors::InvalidArgument("angle be a 0-dimensional tensor"));
+
+            const auto img_height  = _input_img.dim_size(0);
+            const auto img_width   = _input_img.dim_size(1);
+            const auto img_channel = _input_img.dim_size(2);
+
+			OP_REQUIRES(context, (img_channel == 1)||(img_channel==3), errors::InvalidArgument("image channel must be 1 or 3."));
+
+            auto        input_img     = _input_img.template flat<T>().data();
+            auto        angle         = _angle.template flat<float>().data()[0];
+            Tensor     *output_tensor = nullptr;
+            const auto  cv_type       = (img_channel==1?bm::at<type_to_int_c1,T>::type::value:bm::at<type_to_int_c3,T>::type::value);
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, _input_img.shape(), &output_tensor));
+
+            auto      o_tensor = output_tensor->template flat<T>().data();
+            cv::Mat i_img(img_height,img_width,cv_type,(uint8_t*)input_img);
+            cv::Mat o_img(img_height,img_width,cv_type,(uint8_t*)o_tensor);
+            const cv::Point2f cp(img_width/2,img_height/2);
+            cv::Mat r = cv::getRotationMatrix2D(cp,angle,1.0);
+
+            cv::warpAffine(i_img,o_img,r,cv::Size(img_width,img_height));
+        }
+};
+REGISTER_KERNEL_BUILDER(Name("TensorRotate").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), TensorRotateOp<CPUDevice, uint8_t>);
+REGISTER_KERNEL_BUILDER(Name("TensorRotate").Device(DEVICE_CPU).TypeConstraint<float>("T"), TensorRotateOp<CPUDevice, float>);
