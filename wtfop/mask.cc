@@ -20,6 +20,7 @@
 #include <boost/mpl/int.hpp>
 #include <boost/mpl/at.hpp>
 #include "bboxes.h"
+#include <future>
 #include "wtoolkit.h"
 
 using namespace tensorflow;
@@ -328,6 +329,7 @@ class MaskRotateOp: public OpKernel {
 		}
 		void Compute(OpKernelContext* context) override
 		{
+            TIME_THISV1("RotateMask");
 			const Tensor &_input_img = context->input(0);
 			const Tensor &_angle = context->input(1);
 
@@ -354,23 +356,27 @@ class MaskRotateOp: public OpKernel {
             const cv::Point2f cp(img_width/2,img_height/2);
             const cv::Mat r            = cv::getRotationMatrix2D(cp,angle,1.0);
             const auto    cv_type      = bm::at<type_to_int,T>::type::value;
+            auto fn  = [img_height,img_width,cv_type,r](T* i_data,T* o_data,float* bbox) {
+                cv::Mat i_img(img_height,img_width,cv_type,i_data);
+                cv::Mat o_img(img_height,img_width,cv_type,o_data);
+
+                cv::warpAffine(i_img,o_img,r,cv::Size(img_width,img_height));
+                getBBox(o_img,bbox);
+            };
+            list<future<void>> futures;
 
             for(auto i=0; i<img_channel; ++i) {
                 auto i_data = input_img+i *img_width *img_height;
                 auto o_data = o_tensor+i *img_width *img_height;
                 auto bbox   = o_bbox+i *4;
-
-                cv::Mat i_img(img_height,img_width,cv_type,(T*)i_data);
-                cv::Mat o_img(img_height,img_width,cv_type,o_data);
-
-                cv::warpAffine(i_img,o_img,r,cv::Size(img_width,img_height));
-                getBBox(o_img,bbox);
-
+                futures.emplace_back(async(launch::async,fn,(T*)i_data,o_data,bbox));
+                if(futures.size()>8)
+                    futures.pop_front();
             }
-
+            futures.clear();
         }
 
-        void getBBox(const cv::Mat& img,float* bbox)
+        static void getBBox(const cv::Mat& img,float* bbox)
         {
             vector<vector<cv::Point>> contours;
             vector<cv::Vec4i> hierarchy;
