@@ -3,12 +3,7 @@ from distutils.core import setup
 from distutils.command.install import install as DistutilsInstall
 import sys
 import subprocess
-
-try:
-    import tensorflow
-except ImportError:
-    print("Please install tensorflow 0.12.0 or later")
-    sys.exit()
+import tensorflow
     
 
 class MyInstall(DistutilsInstall):

@@ -285,11 +285,12 @@ class FullSizeMaskOp: public OpKernel {
 
                 o_tensor.chip(i,0).slice(offset,extents) = src_map;
 
-                if((xmax-xmin>mw) || (ymax-ymin>mh)) {
+                /*if(((xmax-xmin>mw) || (ymax-ymin>mh)) && (xmax>xmin) && (ymax>ymin)) {
                     cv::Mat dst_mask(H,W,bm::at<type_to_int,T>::type::value,output_mask->template flat<T>().data()+H*W*i);
+                    cv::Mat src_mask = dst_mask.clone();
                     const auto k = max<int>(3,sqrt((xmax-xmin)*(ymax-ymin)/(mh*mw))+1);
-                    cv::medianBlur(dst_mask,dst_mask,(k/2)*2+1);
-                }
+                    cv::medianBlur(src_mask,dst_mask,(k/2)*2+1);
+                }*/
                 
             }
 		}
