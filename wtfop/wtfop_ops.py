@@ -36,6 +36,7 @@ min_area_rect = wtfop_module.min_area_rect
 full_size_mask = wtfop_module.full_size_mask
 mask_rotate = wtfop_module.mask_rotate
 tensor_rotate = wtfop_module.tensor_rotate
+get_bboxes_from_mask = wtfop_module.get_bboxes_from_mask
 #deform_conv_op = wtfop_module.deform_conv_op
 #deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
 

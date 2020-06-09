@@ -311,7 +311,7 @@ REGISTER_OP("MaskRotate")
     .SetShapeFn([](shape_inference::InferenceContext* c){
             auto input_shape0 = c->input(0);
             c->set_output(0, input_shape0);
-            auto data_nr = c->Dim(input_shape0,2);
+            auto data_nr = c->Dim(input_shape0,0);
             auto output_shape1 = c->MakeShape({data_nr,4});
             c->set_output(1, output_shape1);
 			return Status::OK();
@@ -399,6 +399,11 @@ class MaskRotateOp: public OpKernel {
             for (auto &cont:contours) 
                 points.insert(points.end(),cont.begin(),cont.end());
 
+            if(points.size()<2) {
+               memset(bbox,0,sizeof(float)*4);
+               return;
+            }
+
             const auto rect = cv::boundingRect(points);
 
             bbox[0] = rect.y;
@@ -409,3 +414,105 @@ class MaskRotateOp: public OpKernel {
 };
 REGISTER_KERNEL_BUILDER(Name("MaskRotate").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), MaskRotateOp<CPUDevice, uint8_t>);
 REGISTER_KERNEL_BUILDER(Name("MaskRotate").Device(DEVICE_CPU).TypeConstraint<float>("T"), MaskRotateOp<CPUDevice, float>);
+
+/*
+ * 对mask [Nr,H,W] 旋转指定角度，同时返回相应instance的bbox
+ * bbox [N,4],[ymin,xmin,ymax,xmax], 绝对坐标
+ */
+REGISTER_OP("GetBboxesFromMask")
+    .Attr("T: {uint8,float}")
+    .Input("image: T")
+	.Output("bbox:float")
+    .SetShapeFn([](shape_inference::InferenceContext* c){
+            auto input_shape0 = c->input(0);
+            auto data_nr = c->Dim(input_shape0,0);
+            auto output_shape = c->MakeShape({data_nr,4});
+            c->set_output(0, output_shape);
+			return Status::OK();
+            });
+
+template <typename Device, typename T>
+class GetBboxesFromMaskOp: public OpKernel {
+    private:
+        using Tensor3D = Eigen::Tensor<T,3,Eigen::RowMajor>;
+        using type_to_int = bm::map<
+              bm::pair<uint8_t,bm::int_<CV_8UC1>>
+                  , bm::pair<float,bm::int_<CV_32FC1>>
+             >;
+	public:
+		explicit GetBboxesFromMaskOp(OpKernelConstruction* context) : OpKernel(context) {
+		}
+		void Compute(OpKernelContext* context) override
+		{
+            TIME_THISV1("GetBboxesFromMask");
+			const Tensor &_input_img = context->input(0);
+
+			OP_REQUIRES(context, _input_img.dims() == 3, errors::InvalidArgument("tensor must be a 3-dimensional tensor"));
+
+            auto         input_img     = _input_img.template flat<T>().data();
+            const auto   img_channel   = _input_img.dim_size(0);
+            const auto   img_height    = _input_img.dim_size(1);
+            const auto   img_width     = _input_img.dim_size(2);
+            const int    dim2d[]       = {img_channel,4};
+            TensorShape  output_shape;
+            Tensor      *output_bbox   = nullptr;
+
+            TensorShapeUtils::MakeShape(dim2d,2,&output_shape);
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_bbox));
+
+            auto          o_bbox       = output_bbox->template flat<float>().data();
+            const auto    cv_type      = bm::at<type_to_int,T>::type::value;
+            auto fn  = [img_height,img_width,cv_type](T* i_data,float* bbox) {
+                cv::Mat i_img(img_height,img_width,cv_type,i_data);
+                getBBox(i_img,bbox);
+            };
+            list<future<void>> futures;
+
+            for(auto i=0; i<img_channel; ++i) {
+                auto i_data = input_img+i *img_width *img_height;
+                auto bbox   = o_bbox+i *4;
+                futures.emplace_back(async(launch::async,fn,(T*)i_data,bbox));
+                if(futures.size()>8)
+                    futures.pop_front();
+            }
+            futures.clear();
+        }
+
+        static void getBBox(const cv::Mat& img,float* bbox)
+        {
+            vector<vector<cv::Point>> contours;
+            vector<cv::Vec4i> hierarchy;
+            vector<cv::Point> points;
+            const auto    cv_type      = bm::at<type_to_int,T>::type::value;
+            cv::Mat dst_img(img.rows,img.cols,cv_type);
+
+
+            if(cv_type == CV_32FC1) {
+                cv::threshold(img,dst_img,0.5,255,CV_THRESH_BINARY);
+                cv::Mat dst_img1;
+                dst_img.convertTo(dst_img1,CV_8UC1);
+                cv::findContours(dst_img1, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE, cv::Point(0,0));
+            } else {
+                cv::threshold(img,dst_img,127,255,CV_THRESH_BINARY);
+                cv::findContours(dst_img, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE, cv::Point(0,0));
+            }
+
+            for (auto &cont:contours) 
+                points.insert(points.end(),cont.begin(),cont.end());
+
+            if(points.size()<2) {
+               memset(bbox,0,sizeof(float)*4);
+               return;
+            }
+
+            const auto rect = cv::boundingRect(points);
+
+            bbox[0] = rect.y;
+            bbox[1] = rect.x;
+            bbox[2] = rect.y+rect.height;
+            bbox[3] = rect.x+rect.width;
+        }
+};
+REGISTER_KERNEL_BUILDER(Name("GetBboxesFromMask").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), GetBboxesFromMaskOp<CPUDevice, uint8_t>);
+REGISTER_KERNEL_BUILDER(Name("GetBboxesFromMask").Device(DEVICE_CPU).TypeConstraint<float>("T"), GetBboxesFromMaskOp<CPUDevice, float>);
