@@ -23,7 +23,7 @@ using namespace std;
 typedef Eigen::ThreadPoolDevice CPUDevice;
 /*
  * scales:list of float
- * aspect_ratios: list of floats
+ * aspect_ratios: list of floats (w/h)
  * shape:[H,W]
  * size:[h,w]: whole image size, use the same metrics as scales does，for example scales use relative unit (0.1,0.2) then size is (1,1)
  * scales use pixel unit (128,128), then size use input image size (640,800)

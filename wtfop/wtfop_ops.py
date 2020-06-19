@@ -34,11 +34,25 @@ wtfop_module = tf.load_op_library(lib_path)
 random_select = wtfop_module.random_select
 min_area_rect = wtfop_module.min_area_rect
 full_size_mask = wtfop_module.full_size_mask
-mask_rotate = wtfop_module.mask_rotate
 tensor_rotate = wtfop_module.tensor_rotate
-get_bboxes_from_mask = wtfop_module.get_bboxes_from_mask
 #deform_conv_op = wtfop_module.deform_conv_op
 #deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
+
+def mask_rotate(mask,angle,get_bboxes_stride=None):
+    mask = wtfop_module.mask_rotate(mask=mask,angle=angle)
+    bbox = get_bboxes_from_mask(mask,stride=get_bboxes_stride)
+
+    return mask,bbox
+
+def get_bboxes_from_mask(mask,stride=None):
+    if stride is None or stride==1:
+        return wtfop_module.get_bboxes_from_mask(mask=mask)
+    else:
+        size = tf.shape(mask)//stride
+        mask = tf.expand_dims(mask,axis=-1)
+        mask = tf.image.resize_nearest_neighbor(mask,size[1:3])
+        mask = tf.squeeze(mask,axis=-1)
+        return wtfop_module.get_bboxes_from_mask(mask=mask)*stride
 
 def roi_pooling(input, rois, pool_height, pool_width,spatial_scale=1.0):
     out = wtfop_module.roi_pooling(input, rois, pool_height=pool_height, pool_width=pool_width,spatial_scale=spatial_scale)

@@ -304,16 +304,12 @@ REGISTER_KERNEL_BUILDER(Name("FullSizeMask").Device(DEVICE_CPU).TypeConstraint<u
  */
 REGISTER_OP("MaskRotate")
     .Attr("T: {uint8,float}")
-    .Input("image: T")
+    .Input("mask: T")
     .Input("angle: float")
 	.Output("o_image:T")
-	.Output("bbox:float")
     .SetShapeFn([](shape_inference::InferenceContext* c){
             auto input_shape0 = c->input(0);
             c->set_output(0, input_shape0);
-            auto data_nr = c->Dim(input_shape0,0);
-            auto output_shape1 = c->MakeShape({data_nr,4});
-            c->set_output(1, output_shape1);
 			return Status::OK();
             });
 
@@ -342,74 +338,31 @@ class MaskRotateOp: public OpKernel {
             const auto   img_channel   = _input_img.dim_size(0);
             const auto   img_height    = _input_img.dim_size(1);
             const auto   img_width     = _input_img.dim_size(2);
-            const int    dim2d[]       = {img_channel,4};
-            TensorShape  output_shape;
             Tensor      *output_tensor = nullptr;
-            Tensor      *output_bbox   = nullptr;
 
-            TensorShapeUtils::MakeShape(dim2d,2,&output_shape);
 
 			OP_REQUIRES_OK(context, context->allocate_output(0, _input_img.shape(), &output_tensor));
-			OP_REQUIRES_OK(context, context->allocate_output(1, output_shape, &output_bbox));
 
             auto          o_tensor     = output_tensor->template flat<T>().data();
-            auto          o_bbox       = output_bbox->template flat<float>().data();
             const cv::Point2f cp(img_width/2,img_height/2);
             const cv::Mat r            = cv::getRotationMatrix2D(cp,angle,1.0);
             const auto    cv_type      = bm::at<type_to_int,T>::type::value;
-            auto fn  = [img_height,img_width,cv_type,r](T* i_data,T* o_data,float* bbox) {
+            auto fn  = [img_height,img_width,cv_type,r](T* i_data,T* o_data) {
                 cv::Mat i_img(img_height,img_width,cv_type,i_data);
                 cv::Mat o_img(img_height,img_width,cv_type,o_data);
 
                 cv::warpAffine(i_img,o_img,r,cv::Size(img_width,img_height));
-                getBBox(o_img,bbox);
             };
             list<future<void>> futures;
 
             for(auto i=0; i<img_channel; ++i) {
                 auto i_data = input_img+i *img_width *img_height;
                 auto o_data = o_tensor+i *img_width *img_height;
-                auto bbox   = o_bbox+i *4;
-                futures.emplace_back(async(launch::async,fn,(T*)i_data,o_data,bbox));
+                futures.emplace_back(async(launch::async,fn,(T*)i_data,o_data));
                 if(futures.size()>8)
                     futures.pop_front();
             }
             futures.clear();
-        }
-
-        static void getBBox(const cv::Mat& img,float* bbox)
-        {
-            vector<vector<cv::Point>> contours;
-            vector<cv::Vec4i> hierarchy;
-            vector<cv::Point> points;
-            const auto    cv_type      = bm::at<type_to_int,T>::type::value;
-            cv::Mat dst_img(img.rows,img.cols,cv_type);
-
-
-            if(cv_type == CV_32FC1) {
-                cv::threshold(img,dst_img,0.5,255,CV_THRESH_BINARY);
-                cv::Mat dst_img1;
-                dst_img.convertTo(dst_img1,CV_8UC1);
-                cv::findContours(dst_img1, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE, cv::Point(0,0));
-            } else {
-                cv::threshold(img,dst_img,127,255,CV_THRESH_BINARY);
-                cv::findContours(dst_img, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE, cv::Point(0,0));
-            }
-
-            for (auto &cont:contours) 
-                points.insert(points.end(),cont.begin(),cont.end());
-
-            if(points.size()<2) {
-               memset(bbox,0,sizeof(float)*4);
-               return;
-            }
-
-            const auto rect = cv::boundingRect(points);
-
-            bbox[0] = rect.y;
-            bbox[1] = rect.x;
-            bbox[2] = rect.y+rect.height;
-            bbox[3] = rect.x+rect.width;
         }
 };
 REGISTER_KERNEL_BUILDER(Name("MaskRotate").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), MaskRotateOp<CPUDevice, uint8_t>);
@@ -421,7 +374,7 @@ REGISTER_KERNEL_BUILDER(Name("MaskRotate").Device(DEVICE_CPU).TypeConstraint<flo
  */
 REGISTER_OP("GetBboxesFromMask")
     .Attr("T: {uint8,float}")
-    .Input("image: T")
+    .Input("mask: T")
 	.Output("bbox:float")
     .SetShapeFn([](shape_inference::InferenceContext* c){
             auto input_shape0 = c->input(0);
