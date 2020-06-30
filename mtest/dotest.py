@@ -532,6 +532,16 @@ class WTFOPTest(tf.test.TestCase):
             ]
             self.assertAllClose(res,target,atol=1e-4)
 
+    def test_make_index(self):
+        with self.test_session() as sess:
+            mask = np.array([[True,True,True,False],[True,True,False,False],[True,True,True,True]])
+            index = wop.make_neg_pair_index(mask)
+            index = sess.run(index)
+            target_index = np.array([[[0,1], [0,2], [1,2], [-1,-1], [-1,-1], [-1,-1]] ,
+                                     [[0,1], [-1,-1], [-1,-1], [-1,-1], [-1,-1], [-1,-1]] ,
+                                     [[0,1], [0,2], [0,3], [1,2], [1,3], [2,3]]])
+            self.assertAllEqual(index,target_index)
+
 if __name__ == "__main__":
     random.seed(int(time.time()))
     tf.test.main()

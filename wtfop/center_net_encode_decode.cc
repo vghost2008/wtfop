@@ -472,3 +472,65 @@ class CenterBoxesDecodeOp: public OpKernel {
         float threshold_ = 1e-3;
 };
 REGISTER_KERNEL_BUILDER(Name("CenterBoxesDecode").Device(DEVICE_CPU).TypeConstraint<float>("T"), CenterBoxesDecodeOp<CPUDevice, float>);
+
+REGISTER_OP("MakeNegPairIndex")
+    .Input("mask: bool")
+	.Output("index0:int32")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+            const auto input_shape1 = c->input(0);
+            const auto batch_size = c->Dim(input_shape1,0);
+            const auto data_nr = c->Value(c->Dim(input_shape1,1));
+            const auto out_nr = data_nr>0?data_nr*(data_nr-1)/2:-1;
+            auto shape0 = c->MakeShape({batch_size,out_nr,2});
+
+			c->set_output(0, shape0);
+			c->set_output(1, shape0);
+			return Status::OK();
+			});
+
+template <typename Device>
+class MakeNegPairIndexOp: public OpKernel {
+	public:
+		explicit MakeNegPairIndexOp(OpKernelConstruction* context) : OpKernel(context) {
+		}
+
+		void Compute(OpKernelContext* context) override
+        {
+            TIME_THISV1("CenterBoxesEncode");
+            const Tensor &_mask = context->input(0);
+
+            OP_REQUIRES(context, _mask.dims() == 2, errors::InvalidArgument("mask data must be 2-dimension"));
+
+            auto         mask       = _mask.template tensor<bool,2>();
+            const auto   batch_size = _mask.dim_size(0);
+            const auto   data_nr    = _mask.dim_size(1);
+            int          dims_3d[]  = {int(batch_size),data_nr *(data_nr-1)/2,2};
+            TensorShape  outshape0;
+            Tensor      *index      = nullptr;
+
+            TensorShapeUtils::MakeShape(dims_3d, 3, &outshape0);
+
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &index));
+
+            auto index_tensor = index->template tensor<int,3>();
+
+            index_tensor.setConstant(-1);
+
+            for(auto i=0; i<batch_size; ++i) {
+                int j = 0;
+                for(j=0; j<data_nr; ++j) 
+                    if(!mask(i,j))
+                        break;
+                auto idx = 0;
+                for(auto l=0; l<j; ++l) {
+                    for(auto m=l+1; m<j; ++m) {
+                        index_tensor(i,idx,0) = l;
+                        index_tensor(i,idx,1) = m;
+                        ++idx;
+                    }
+                }
+            }
+        }
+};
+REGISTER_KERNEL_BUILDER(Name("MakeNegPairIndex").Device(DEVICE_CPU), MakeNegPairIndexOp<CPUDevice>);
