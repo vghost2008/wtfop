@@ -35,6 +35,10 @@ random_select = wtfop_module.random_select
 min_area_rect = wtfop_module.min_area_rect
 full_size_mask = wtfop_module.full_size_mask
 tensor_rotate = wtfop_module.tensor_rotate
+left_pool = wtfop_module.left_pool
+right_pool = wtfop_module.right_pool
+bottom_pool = wtfop_module.bottom_pool
+top_pool = wtfop_module.top_pool
 #deform_conv_op = wtfop_module.deform_conv_op
 #deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
 
@@ -440,3 +444,39 @@ def _deform_conv_grad(op, grad):
     data_grad = deform_conv_grad_op(data, filter, offset, grad, strides, rates, num_groups, deformable_group, padding,
                                     data_format)
     return data_grad
+
+@ops.RegisterGradient("LeftPool")
+def _left_pool(op, grad):
+  tensor = op.inputs[0]
+  fw_output = op.outputs[0]
+
+  data_grad = wtfop_module.left_pool_grad(tensor,fw_output,grad)
+
+  return data_grad
+
+@ops.RegisterGradient("RightPool")
+def _right_pool(op, grad):
+  tensor = op.inputs[0]
+  fw_output = op.outputs[0]
+
+  data_grad = wtfop_module.right_pool_grad(tensor,fw_output,grad)
+
+  return data_grad
+
+@ops.RegisterGradient("BottomPool")
+def _bottom_pool(op, grad):
+  tensor = op.inputs[0]
+  fw_output = op.outputs[0]
+
+  data_grad = wtfop_module.bottom_pool_grad(tensor,fw_output,grad)
+
+  return data_grad
+
+@ops.RegisterGradient("TopPool")
+def _top_pool(op, grad):
+  tensor = op.inputs[0]
+  fw_output = op.outputs[0]
+
+  data_grad = wtfop_module.top_pool_grad(tensor,fw_output,grad)
+
+  return data_grad

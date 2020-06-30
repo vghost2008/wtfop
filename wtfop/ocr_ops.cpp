@@ -1068,6 +1068,7 @@ class MachWordsOp: public OpKernel {
 REGISTER_KERNEL_BUILDER(Name("MachWords").Device(DEVICE_CPU).TypeConstraint<int>("T"), MachWordsOp<CPUDevice, int>);
 
 /*
+ * 将同一个词的字符合并在一起（仅根据word index判断两个字符是否属于同一个词），删除词前后的空格，删除空的词，对部分字符进行校正
  * labels:[Nr]
  * word_index:[Nr] word index
  * space_type:空格的类型
@@ -1127,11 +1128,14 @@ class SimpleMergeCharacterOp: public OpKernel {
             auto          windex  = _windex.template tensor<int,1>();
             const auto    nr      = _labels.dim_size(0);
 
-            vector<int> res;
-            vector<int> char_index;
-            vector<int> cur_char;
+            vector<int> res; //输出字符集，0表示词的分隔符
+            vector<int> char_index; //字符集res中每一个字符所对应的输入labels的索引
+            vector<int> cur_char; 
             vector<int> cur_index;
             auto last_word_index = nr>0?windex(0):0;
+            /*
+             * 删除当前词cur_char前后的空格
+             */
             auto strip = [this,&cur_char,&cur_index](){
                 while(!cur_char.empty() && (cur_char.front() == space_type_)) {
                     cur_char.erase(cur_char.begin());

@@ -26,6 +26,21 @@ using namespace std;
 
 typedef Eigen::ThreadPoolDevice CPUDevice;
 typedef Eigen::GpuDevice GPUDevice;
+/*
+ * max_box_nr: groundtruth box的最大可能数量, -1表示按需分配
+ * gaussian_iou: 一般为0.7
+ * gbboxes: groundtruth bbox, [B,N,4] 相对坐标
+ * glabels: 标签[B,N]
+ * glength: 有效的groundtruth bbox数量
+ * output_size: 输出图的大小[2]=(OH,OW) 
+ *
+ * output:
+ * output_heatmaps_tl: top left heatmaps [B,OH,OW,C]
+ * output_heatmaps_br: bottom right heatmaps [B,OH,OW,C]
+ * output_heatmaps_c: center heatmaps [B,OH,OW,C]
+ * output_offset: positive point offset [B,max_box_nr,6] (ytl,xtl,ybr,xbr,yc,xc)
+ * output_tags: positive point index [B,max_box_nr,3] (itl,ibr,ic)
+ */
 REGISTER_OP("CenterBoxesEncode")
     .Attr("T: {float,double,int32,int64}")
 	.Attr("max_box_nr:int")
@@ -83,9 +98,10 @@ class CenterBoxesEncodeOp: public OpKernel {
             OP_REQUIRES(context, _glabels.dims() == 2, errors::InvalidArgument("labels data must be 2-dimension"));
             OP_REQUIRES(context, _gsize.dims() == 1, errors::InvalidArgument("gsize data must be 1-dimension"));
 
+            const auto    max_box_nr = max_box_nr_>0?max_box_nr_:*max_element(_gsize.template flat<int>().data(),_gsize.template flat<int>().data()+batch_size);
             int           dims_4d[4]            = {int(batch_size),output_size[0],output_size[1],num_classes_};
-            int           dims_3d0[3]           = {int(batch_size),max_box_nr_,6};
-            int           dims_3d1[3]           = {int(batch_size),max_box_nr_,3};
+            int           dims_3d0[3]           = {int(batch_size),max_box_nr,6};
+            int           dims_3d1[3]           = {int(batch_size),max_box_nr,3};
             TensorShape  outshape0;
             TensorShape  outshape1;
             TensorShape  outshape2;
@@ -175,6 +191,9 @@ class CenterBoxesEncodeOp: public OpKernel {
 };
 REGISTER_KERNEL_BUILDER(Name("CenterBoxesEncode").Device(DEVICE_CPU).TypeConstraint<float>("T"), CenterBoxesEncodeOp<CPUDevice, float>);
 
+/*
+ *
+ */
 REGISTER_OP("CenterBoxesDecode")
     .Attr("T: {float,double,int32,int64}")
     .Attr("k:int")
