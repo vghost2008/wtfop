@@ -6,14 +6,14 @@ TF_LIB = $(shell python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib(
 #TF_LIB = $(shell /usr/local/anaconda3/bin/python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib())')
 #TF_LIB = $(shell /home/wj/anaconda3_cpu/bin/python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib())')
 #TF_LIB = "/home/vghost/.local/lib/python3.6/site-packages/tensorflow"
-#USE_CUDA := "YES"
+USE_CUDA := "YES"
 #all: build
 #all: clean build
 #g++ -std=c++14 -shared -g -o $@ $^ -I $(TF_INC) -fPIC -D_GLIBCXX_USE_CXX11_ABI=0 -L${TF_LIB} -ltensorflow_framework 
 #CXXFLAGS = -I ${TF_INC} -fPIC -L${TF_LIB} -ltensorflow_framework -D_GLIBCXX_USE_CXX11_ABI
 CXX11_ABI=0
-#OPT = -O3
-OPT = -g
+OPT = -O3
+#OPT = -g
 CUDA_OPT = -O0
 #UDA_OPT = -g
 CXXFLAGS = -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared ${OPT} -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -fPIC -L${TF_LIB} -ltensorflow_framework `pkg-config --cflags opencv` `pkg-config --libs opencv`
@@ -57,8 +57,8 @@ deform_conv.o:thirdparty/deformable-conv/lib/deform_conv.cc
 wtfop.so:${targets}
 	echo $CXXFLAGS
 	echo $^
-	#g++ -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared ${OPT} -o $@ $^ -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -fPIC -L${TF_LIB} -ltensorflow_framework  -L/usr/local/cuda-9.0/lib64 -lcudart -lcudadevrt `pkg-config --cflags opencv` `pkg-config --libs opencv` 
-	g++ -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared ${OPT} -o $@ $^ -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -fPIC -L${TF_LIB} -ltensorflow_framework  `pkg-config --cflags opencv` `pkg-config --libs opencv` 
+	g++ -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared ${OPT} -o $@ $^ -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -fPIC -L${TF_LIB} -ltensorflow_framework  -L/usr/local/cuda-9.0/lib64 -lcudart -lcudadevrt `pkg-config --cflags opencv` `pkg-config --libs opencv` 
+	#g++ -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared ${OPT} -o $@ $^ -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -fPIC -L${TF_LIB} -ltensorflow_framework  `pkg-config --cflags opencv` `pkg-config --libs opencv` 
 
 clean:
 	rm -f *.o *.so *.pyc *.npy

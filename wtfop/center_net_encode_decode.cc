@@ -534,3 +534,101 @@ class MakeNegPairIndexOp: public OpKernel {
         }
 };
 REGISTER_KERNEL_BUILDER(Name("MakeNegPairIndex").Device(DEVICE_CPU), MakeNegPairIndexOp<CPUDevice>);
+
+
+/*
+ * nrs = [3,5]
+ * bboxes: [B,N,4]. (ymin,xmin,ymax,xmax)
+ * center_points: [B,M] (y,x)
+ * bboxes_length: [B]
+ * size_threshold: ()
+ */
+REGISTER_OP("CenterBoxesFilter")
+    .Attr("T: {float,double}")
+    .Attr("nrs: list(int)")
+    .Input("bboxes: T")
+    .Input("center_points: T")
+    .Input("bboxes_length: int32")
+    .Input("size_threshold: T")
+    .Output("mask: bool")
+    .SetShapeFn([](shape_inference::InferenceContext* c) {
+            const auto input_shape0 = c->input(0);
+            const auto batch_size = c->Dim(input_shape0,0);
+            const auto box_nr = c->Dim(input_shape0,1);
+            auto shape0 = c->MakeShape({batch_size,box_nr});
+            c->set_output(0, shape0);
+            return Status::OK();
+            });
+
+template <typename Device,typename T>
+class CenterBoxesFilterOp: public OpKernel {
+    public:
+        explicit CenterBoxesFilterOp(OpKernelConstruction* context) : OpKernel(context) {
+            OP_REQUIRES_OK(context, context->GetAttr("nrs", &nrs_));
+        }
+
+        void Compute(OpKernelContext* context) override
+        {
+            TIME_THISV1("CenterBoxesFilter");
+            const Tensor &_bboxes             = context->input(0);
+            const Tensor &_center_points      = context->input(1);
+            const Tensor &_bboxes_length      = context->input(2);
+            const Tensor &_size_threshold     = context->input(3);
+            auto          bboxes              = _bboxes.template tensor<T,3>();
+            auto          center_points       = _center_points.template tensor<T,3>();
+            auto          bboxes_length       = _bboxes_length.template tensor<int,1>();
+            auto          size_threshold      = _size_threshold.template flat<T>().data()[0];
+            const auto    real_size_threshold = size_threshold *size_threshold;
+            const auto    batch_size          = _bboxes.dim_size(0);
+            const auto    data_nr             = _bboxes.dim_size(1);
+            int           dims_2d[]           = {int(batch_size),data_nr};
+            TensorShape   outshape0;
+            Tensor       *mask                = nullptr;
+
+            TensorShapeUtils::MakeShape(dims_2d, 2, &outshape0);
+
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &mask));
+
+            auto mask_tensor = mask->template tensor<bool,2>();
+
+            mask_tensor.setConstant(false);
+
+            for(auto i=0; i<batch_size; ++i) {
+                const auto nr = bboxes_length(i);
+                const auto t_bboxes = bboxes.chip(i,0);
+                for(auto j=0; j<nr; ++j) {
+                    Eigen::Tensor<T,1,Eigen::RowMajor> bbox = t_bboxes.chip(j,0);
+                    mask_tensor(i,j) = is_in_center(bbox,center_points,real_size_threshold,i);
+                }
+            }
+       }
+       template<typename BT0,typename BT1>
+       bool is_in_center(const BT0& box, const BT1& center_points, const T size_threshold,int batch_index) 
+       {
+           const auto box_size = (box(2)-box(0))*(box(3)-box(1));
+           int n = 0;
+           if(box_size>size_threshold) {
+               n = nrs_[1];
+           } else {
+               n = nrs_[0];
+           }
+           const auto ctlx = ((n+1)*box(1)+(n-1)*box(3))/(n<<1);
+           const auto ctly = ((n+1)*box(0)+(n-1)*box(2))/(n<<1);
+           const auto cbrx = ((n-1)*box(1)+(n+1)*box(3))/(n<<1);
+           const auto cbry = ((n-1)*box(0)+(n+1)*box(2))/(n<<1);
+           const auto data_nr = center_points.dimension(1);
+
+           for(auto i=0; i<data_nr; ++i) {
+               const auto px = center_points(batch_index,i,1);
+               const auto py = center_points(batch_index,i,0);
+               if((px>ctlx) && (px<cbrx) && (py>ctly) && (py<cbry))
+                   return true;
+           }
+           return false;
+       }
+    private:
+        vector<int> nrs_;
+};
+REGISTER_KERNEL_BUILDER(Name("CenterBoxesFilter").Device(DEVICE_CPU).TypeConstraint<float>("T"), CenterBoxesFilterOp<CPUDevice, float>);
+REGISTER_KERNEL_BUILDER(Name("CenterBoxesFilter").Device(DEVICE_CPU).TypeConstraint<double>("T"), CenterBoxesFilterOp<CPUDevice, double>);
