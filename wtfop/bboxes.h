@@ -452,5 +452,5 @@ inline float get_gaussian_radius(float height,float width,float min_overlap)
     auto c3 = -width*height*(1-min_overlap);
     auto sq3 = sqrt(b3*b3-4*a3*c3);
     auto r3 = (b3+sq3)/2;
-    return std::min<float>({r1,r2,r3});
+    return std::max<float>(0,std::min<float>({r1,r2,r3}));
 }

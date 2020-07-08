@@ -30,7 +30,7 @@ typedef Eigen::GpuDevice GPUDevice;
  * max_box_nr: groundtruth box的最大可能数量, -1表示按需分配
  * gaussian_iou: 一般为0.7
  * gbboxes: groundtruth bbox, [B,N,4] 相对坐标
- * glabels: 标签[B,N]
+ * glabels: 标签[B,N], 背景为0
  * glength: 有效的groundtruth bbox数量
  * output_size: 输出图的大小[2]=(OH,OW) 
  *
@@ -147,11 +147,10 @@ class CenterBoxesEncodeOp: public OpKernel {
                     const auto yc = int(fyc+0.5);
                     const auto xc = int(fxc+0.5);
                     const auto r0 = get_gaussian_radius(fybr-fytl,fxbr-fxtl,gaussian_iou_);
-                    const auto r1 = min<float>(r0,min(fybr-fytl,fxbr-fxtl)/2.0);
                     const auto label = glabels(i,j);
                     draw_gaussian(heatmaps_tl,xtl,ytl,r0,i,label);
                     draw_gaussian(heatmaps_br,xbr,ybr,r0,i,label);
-                    draw_gaussian(heatmaps_c,fxc,fyc,r1,i,label);
+                    draw_gaussian(heatmaps_c,fxc,fyc,r0,i,label,5);
                     offsets(i,j,0) = fytl-ytl;
                     offsets(i,j,1) = fxtl-xtl;
                     offsets(i,j,2) = fybr-ybr;
@@ -165,22 +164,23 @@ class CenterBoxesEncodeOp: public OpKernel {
             }
         }
         template<typename DT>
-        static void draw_gaussian(DT& data,int cx,int cy,float radius,int batch_index,int class_index,float k=1.0)
+        static void draw_gaussian(DT& data,int cx,int cy,float radius,int batch_index,int class_index,float delta=6,float k=1.0)
         {
-            const auto width  = data.dimension(2);
-            const auto height = data.dimension(1);
-            const auto xtl    = max(0,int(cx-radius));
-            const auto ytl    = max(0,int(cy-radius));
-            const auto xbr    = min<int>(width,int(cx+radius+1));
-            const auto ybr    = min<int>(height,int(cy+radius+1));
-            const auto sigma  = radius/3;
+            const auto width   = data.dimension(2);
+            const auto height  = data.dimension(1);
+            const auto xtl     = max(0,int(cx-radius));
+            const auto ytl     = max(0,int(cy-radius));
+            const auto xbr     = min<int>(width,int(cx+radius+1));
+            const auto ybr     = min<int>(height,int(cy+radius+1));
+            const auto sigma   = (2*radius+1)/delta;
+            const auto c_index = class_index-1;
 
             for(auto x=xtl; x<xbr; ++x) {
                 for(auto y=ytl; y<ybr; ++y) {
                     auto dx = x-cx;
                     auto dy = y-cy;
                     auto v = exp(-(dx*dx+dy*dy)/(2*sigma*sigma))*k;
-                    data(batch_index,y,x,class_index) = max(data(batch_index,y,x,class_index),v);
+                    data(batch_index,y,x,c_index) = max(data(batch_index,y,x,c_index),v);
                 }
             }
         }
@@ -542,15 +542,19 @@ REGISTER_KERNEL_BUILDER(Name("MakeNegPairIndex").Device(DEVICE_CPU), MakeNegPair
  * center_points: [B,M] (y,x)
  * bboxes_length: [B]
  * size_threshold: ()
+ * output:
+ * mask:[B,N,4]正确的True, 错误的False
  */
 REGISTER_OP("CenterBoxesFilter")
     .Attr("T: {float,double}")
     .Attr("nrs: list(int)")
     .Input("bboxes: T")
+    .Input("bboxes_clses: int32")
     .Input("center_points: T")
+    .Input("center_clses: int32")
     .Input("bboxes_length: int32")
     .Input("size_threshold: T")
-    .Output("mask: bool")
+    .Output("mask: int32")
     .SetShapeFn([](shape_inference::InferenceContext* c) {
             const auto input_shape0 = c->input(0);
             const auto batch_size = c->Dim(input_shape0,0);
@@ -571,11 +575,15 @@ class CenterBoxesFilterOp: public OpKernel {
         {
             TIME_THISV1("CenterBoxesFilter");
             const Tensor &_bboxes             = context->input(0);
-            const Tensor &_center_points      = context->input(1);
-            const Tensor &_bboxes_length      = context->input(2);
-            const Tensor &_size_threshold     = context->input(3);
+            const Tensor &_bboxes_clses       = context->input(1);
+            const Tensor &_center_points      = context->input(2);
+            const Tensor &_center_clses       = context->input(3);
+            const Tensor &_bboxes_length      = context->input(4);
+            const Tensor &_size_threshold     = context->input(5);
             auto          bboxes              = _bboxes.template tensor<T,3>();
+            auto          bboxes_clses        = _bboxes_clses.template tensor<int,2>();
             auto          center_points       = _center_points.template tensor<T,3>();
+            auto          center_clses        = _center_clses.template tensor<int,2>();
             auto          bboxes_length       = _bboxes_length.template tensor<int,1>();
             auto          size_threshold      = _size_threshold.template flat<T>().data()[0];
             const auto    real_size_threshold = size_threshold *size_threshold;
@@ -590,7 +598,7 @@ class CenterBoxesFilterOp: public OpKernel {
 
             OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &mask));
 
-            auto mask_tensor = mask->template tensor<bool,2>();
+            auto mask_tensor = mask->template tensor<int,2>();
 
             mask_tensor.setConstant(false);
 
@@ -599,12 +607,13 @@ class CenterBoxesFilterOp: public OpKernel {
                 const auto t_bboxes = bboxes.chip(i,0);
                 for(auto j=0; j<nr; ++j) {
                     Eigen::Tensor<T,1,Eigen::RowMajor> bbox = t_bboxes.chip(j,0);
-                    mask_tensor(i,j) = is_in_center(bbox,center_points,real_size_threshold,i);
+                    const auto bbox_cls = bboxes_clses(i,j);
+                    mask_tensor(i,j) = is_in_center(bbox,bbox_cls,center_points,center_clses,real_size_threshold,i);
                 }
             }
        }
-       template<typename BT0,typename BT1>
-       bool is_in_center(const BT0& box, const BT1& center_points, const T size_threshold,int batch_index) 
+       template<typename BT0,typename BT1,typename BT2>
+       int is_in_center(const BT0& box, const int bbox_cls,const BT1& center_points, const BT2& center_clses,const T size_threshold,int batch_index) 
        {
            const auto box_size = (box(2)-box(0))*(box(3)-box(1));
            int n = 0;
@@ -622,10 +631,11 @@ class CenterBoxesFilterOp: public OpKernel {
            for(auto i=0; i<data_nr; ++i) {
                const auto px = center_points(batch_index,i,1);
                const auto py = center_points(batch_index,i,0);
-               if((px>ctlx) && (px<cbrx) && (py>ctly) && (py<cbry))
-                   return true;
+               if((bbox_cls==center_clses(batch_index,i)) && 
+                   (px>ctlx) && (px<cbrx) && (py>ctly) && (py<cbry))
+                   return i;
            }
-           return false;
+           return -1;
        }
     private:
         vector<int> nrs_;

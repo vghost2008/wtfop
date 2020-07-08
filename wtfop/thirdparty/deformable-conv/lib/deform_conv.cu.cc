@@ -673,6 +673,7 @@ struct setZero<GPUDevice, DType>{
 
 }  // namespace functor
 
+#if 0  //wj
 #define DECLARE_GPU_SPEC(DType)                                  \
     template struct functor::deformable_im2col<GPUDevice, DType>; \
     template struct functor::deformable_col2im<GPUDevice, DType>; \
@@ -688,6 +689,7 @@ TF_CALL_double(DECLARE_GPU_SPEC);
 
 // TF_CALL_GPU_NUMBER_TYPES(DECLARE_GPU_SPEC);
 #undef DECLARE_GPU_SPEC
+#endif
 
 }  // namespace tensorflow
 
