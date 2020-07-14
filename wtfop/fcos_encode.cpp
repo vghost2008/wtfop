@@ -175,8 +175,8 @@ class FcosBoxesEncodeOp: public OpKernel {
 
                             center_ness_tensor(i,l,k) = sqrt(std::min(l_dis,r_dis)*std::min(t_dis,b_dis)/(std::max(l_dis,r_dis)*std::max(b_dis,t_dis)+1e-8));
 
-                            regression_tensor(i,l,k,0) = -t_dis;
-                            regression_tensor(i,l,k,1) = -l_dis;
+                            regression_tensor(i,l,k,0) = t_dis;
+                            regression_tensor(i,l,k,1) = l_dis;
                             regression_tensor(i,l,k,2) = b_dis;
                             regression_tensor(i,l,k,3) = r_dis;
 
