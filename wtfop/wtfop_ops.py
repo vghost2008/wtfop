@@ -41,6 +41,7 @@ bottom_pool = wtfop_module.bottom_pool
 top_pool = wtfop_module.top_pool
 make_neg_pair_index = wtfop_module.make_neg_pair_index
 center_boxes_filter= wtfop_module.center_boxes_filter
+fcos_boxes_encode = wtfop_module.fcos_boxes_encode
 #deform_conv_op = wtfop_module.deform_conv_op
 #deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
 
