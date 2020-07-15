@@ -484,7 +484,6 @@ REGISTER_OP("MakeNegPairIndex")
             auto shape0 = c->MakeShape({batch_size,out_nr,2});
 
 			c->set_output(0, shape0);
-			c->set_output(1, shape0);
 			return Status::OK();
 			});
 
