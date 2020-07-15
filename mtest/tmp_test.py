@@ -53,8 +53,8 @@ class WTFOPTest(tf.test.TestCase):
         box = np.array([[[0.25,0.25,0.75,0.75],[0.1,0.1,0.3,0.3]]],dtype=np.float32)
         labels = np.array([[1,2]],dtype=np.int32)
         length = np.array([2],dtype=np.int32)
-        fm_shape = [32,32]
-        img_size = [224,224]
+        fm_shape = [32,16]
+        img_size = [224,112]
         with self.test_session() as sess:
             regression,center_ness,gt_boxes,classes = fcos_boxes_encode(min_size=0,
                                                                         max_size=128,

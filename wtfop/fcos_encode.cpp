@@ -96,7 +96,7 @@ class FcosBoxesEncodeOp: public OpKernel {
             const auto    H          = _fm_shape[0];
             const auto    W          = _fm_shape[1];
             const auto    img_H      = img_size[0];
-            const auto    img_W      = img_size[0];
+            const auto    img_W      = img_size[1];
             const auto    x_delta    = float(img_W)/W;
             const auto    y_delta    = float(img_H)/H;
 
@@ -150,11 +150,11 @@ class FcosBoxesEncodeOp: public OpKernel {
                     const int  end_y   = gbboxes(i,j,2) *H+0.5;
                     const int  end_x   = gbboxes(i,j,3) *W+0.5;
                     const auto classes = glabels(i,j);
-                    const auto max_loc = std::max(end_yf-beg_yf,end_xf-beg_xf);
+                    /*const auto max_loc = std::max(end_yf-beg_yf,end_xf-beg_xf);
 
                     if((max_loc<min_size_) 
                        || (max_loc>max_size_)) 
-                        continue;
+                        continue;*/
 
                     for(auto k=beg_x; k<end_x; ++k) {
                         for(auto l=beg_y; l<end_y; ++l) {
@@ -165,8 +165,8 @@ class FcosBoxesEncodeOp: public OpKernel {
                             const auto max_loc = std::max({l_dis,r_dis,t_dis,b_dis});
 
                             if((max_loc>box_size(l,k)) 
-                                    //|| (max_loc<min_size_) 
-                                    //|| (max_loc>max_size_) 
+                                    || (max_loc<min_size_) 
+                                    || (max_loc>max_size_) 
                                     || (std::min({r_dis,b_dis,l_dis,t_dis})<0)) {
                                 continue;
                             }
