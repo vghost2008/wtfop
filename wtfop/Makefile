@@ -29,27 +29,27 @@ ifdef USE_CUDA
 #targets = mask.o wtfop.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o bboxes_encode_decode_gpu.o center_net_encode_decode.o opencvadapter.o matcher.o matcher_gpu.o ocr_ops.o deform_conv.cu.o deform_conv.o
 targets = mask.o wtfop.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o bboxes_encode_decode_gpu.o center_net_encode_decode.o opencvadapter.o matcher.o matcher_gpu.o ocr_ops.o nms_gpu.o link.o left_pool.o right_pool.o bottom_pool.o top_pool.o fcos_encode.o
 CXXFLAGS += -DGOOGLE_CUDA -DEIGEN_USE_GPU -DEIGEN_USE_THREADS
-CXXFLAGS += -I/usr/local/cuda-9.0/include 
+CXXFLAGS += -I/usr/local/cuda/include 
 else
 targets = mask.o wtfop.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o center_net_encode_decode.o opencvadapter.o matcher.o ocr_ops.o left_pool.o right_pool.o bottom_pool.o top_pool.o fcos_encode.o
 endif
 
 bboxes_encode_decode_gpu.o:bboxes_encode_decode_gpu.cu
-	nvcc -c $^ -I/usr/local/cuda-9.0/include -L/usr/local/cuda-9.0/lib64 ${CUDAFLAGS}
+	nvcc -c $^ -I/usr/local/cuda/include -L/usr/local/cuda/lib64 ${CUDAFLAGS}
 
 matcher_gpu.o:matcher_gpu.cu
-	nvcc -c $^ -I/usr/local/cuda-9.0/include -L/usr/local/cuda-9.0/lib64 ${CUDAFLAGS}
+	nvcc -c $^ -I/usr/local/cuda/include -L/usr/local/cuda/lib64 ${CUDAFLAGS}
 
 deform_conv.cu.o:thirdparty/deformable-conv/lib/deform_conv.cu.cc
-	nvcc -c $^ -I/usr/local/cuda-9.0/include -L/usr/local/cuda-9.0/lib64 ${CUDAFLAGS} --expt-relaxed-constexpr -o $@
+	nvcc -c $^ -I/usr/local/cuda/include -L/usr/local/cuda/lib64 ${CUDAFLAGS} --expt-relaxed-constexpr -o $@
 
 nms_gpu.o:nms_gpu.cu
-	#nvcc -arch=sm_35 -dc -c $^ -I/usr/local/cuda-9.0/include -L/usr/local/cuda-9.0/lib64 -rdc=true ${CUDAFLAGS} --expt-relaxed-constexpr -o $@
-	nvcc -dc $^ -I/usr/local/cuda-9.0/include -L/usr/local/cuda-9.0/lib64 -rdc=true ${CUDAFLAGS} --expt-relaxed-constexpr -o $@
+	#nvcc -arch=sm_35 -dc -c $^ -I/usr/local/cuda/include -L/usr/local/cuda/lib64 -rdc=true ${CUDAFLAGS} --expt-relaxed-constexpr -o $@
+	nvcc -dc $^ -I/usr/local/cuda/include -L/usr/local/cuda/lib64 -rdc=true ${CUDAFLAGS} --expt-relaxed-constexpr -o $@
 
 link.o:nms_gpu.o
-	#nvcc -arch=sm_35 -dc -c $^ -I/usr/local/cuda-9.0/include -L/usr/local/cuda-9.0/lib64 -rdc=true ${CUDAFLAGS} --expt-relaxed-constexpr -o $@
-	nvcc -dlink $^ -gencode arch=compute_60,code=compute_60  -I/usr/local/cuda-9.0/include -L/usr/local/cuda-9.0/lib64 -Xcompiler="-fPIC" -o $@
+	#nvcc -arch=sm_35 -dc -c $^ -I/usr/local/cuda/include -L/usr/local/cuda/lib64 -rdc=true ${CUDAFLAGS} --expt-relaxed-constexpr -o $@
+	nvcc -dlink $^ -gencode arch=compute_60,code=compute_60  -I/usr/local/cuda/include -L/usr/local/cuda/lib64 -Xcompiler="-fPIC" -o $@
 
 deform_conv.o:thirdparty/deformable-conv/lib/deform_conv.cc
 	g++ -c $^ ${CXXFLAGS} -o $@
@@ -57,7 +57,7 @@ deform_conv.o:thirdparty/deformable-conv/lib/deform_conv.cc
 wtfop.so:${targets}
 	echo $CXXFLAGS
 	echo $^
-	g++ -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared ${OPT} -o $@ $^ -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -fPIC -L${TF_LIB} -ltensorflow_framework  -L/usr/local/cuda-9.0/lib64 -lcudart -lcudadevrt `pkg-config --cflags opencv` `pkg-config --libs opencv` 
+	g++ -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared ${OPT} -o $@ $^ -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -fPIC -L${TF_LIB} -ltensorflow_framework  -L/usr/local/cuda/lib64 -lcudart -lcudadevrt `pkg-config --cflags opencv` `pkg-config --libs opencv` 
 	#g++ -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared ${OPT} -o $@ $^ -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -fPIC -L${TF_LIB} -ltensorflow_framework  `pkg-config --cflags opencv` `pkg-config --libs opencv` 
 
 clean:

@@ -96,7 +96,7 @@ class FcosBoxesEncodeOp: public OpKernel {
             const auto    H          = _fm_shape[0];
             const auto    W          = _fm_shape[1];
             const auto    img_H      = img_size[0];
-            const auto    img_W      = img_size[0];
+            const auto    img_W      = img_size[1];
             const auto    x_delta    = float(img_W)/W;
             const auto    y_delta    = float(img_H)/H;
 
