@@ -9,7 +9,7 @@ import random
 import time
 import os
 import object_detection.bboxes as odb
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '5'
 
 class WTFOPTest(tf.test.TestCase):
     @staticmethod
