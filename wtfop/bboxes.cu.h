@@ -34,6 +34,16 @@ __device__ float cuda_bboxes_jaccard(const T0* box0, const T1* box1)
 
 	return int_vol/union_vol;
 }
+template<typename T0,typename T1>
+__device__ float cuda_is_in_gtbox(const T0* box, const T1* gtbox)
+{
+    if((box[0]<gtbox[0])
+            || (box[1]<gtbox[1])
+            || (box[2]>gtbox[2])
+            || (box[3]>gtbox[3]))
+        return false;
+    return true;
+}
 template<typename T>
 __device__ T clamp(T v,T min, T max)
 {

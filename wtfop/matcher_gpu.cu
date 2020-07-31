@@ -68,6 +68,57 @@ __global__ void matcher_get_scores_and_indexs(const float* gbboxes,const float* 
         scores[a_index] = max_s;
     }
 }
+__global__ void matcher_get_scores_and_indexsv2(const float* gbboxes,const float* anchor_bboxes,float* scores,int* indexs,size_t gb_size,size_t ab_size)
+{
+    const auto       a_index                = blockIdx.x;
+    const auto       g_offset               = threadIdx.x;
+    auto             max_i                  = -1;
+    auto             max_s                  = MIN_SCORE_FOR_POS_BOX;
+    float            abbox[4];
+    float            gbbox[4];
+    __shared__ int   max_index[kBlockSize];
+    __shared__ float max_scores[kBlockSize];
+    /*
+     * gbboxes按kBlockSize划分为多个组，下面的代码找到在同一个组中与给定anchor box(a_index)对应的最大ground truth box(max_i,max_s)
+     */
+    for(auto i=0; i<4; ++i)
+        abbox[i] = (anchor_bboxes+(a_index<<2))[i];
+
+    for(auto i=g_offset; i<gb_size; i += blockDim.x) {
+        for(auto j=0; j<4; ++j)
+            gbbox[j] = (gbboxes+(i<<2))[j];
+        if(!cuda_is_in_gtbox(abbox,gbbox))
+            continue;
+        const auto cs = cuda_bboxes_jaccard(abbox,gbbox);
+        if(cs>max_s) {
+            max_i = i;
+            max_s = cs;
+        }
+    }
+    max_index[g_offset] = max_i;
+    max_scores[g_offset] = max_s;
+
+    __syncthreads();
+
+    if(g_offset != 0) return; 
+
+    /*
+     * 线程0在所有的组中找到最大的一个
+     */
+    max_i = -1;
+    max_s = 1e-8;
+    for(auto i=0; i<blockDim.x; ++i) {
+        const auto cs = max_scores[i];
+        if(cs>max_s) {
+            max_i = i;
+            max_s = cs;
+        }
+    }
+    if(max_i>=0) {
+        indexs[a_index] = max_index[max_i];
+        scores[a_index] = max_s;
+    }
+}
 /*
  * 找到与每一个ground truth box相对应的最大的anchor box
  * gbboxes:[gb_size,4]
@@ -147,7 +198,7 @@ __global__ void matcher_get_labels(int* indexs,float* scores,const bool* is_max_
 }
 __host__ void matcher_by_gpu(const float* gbboxes,const float* anchor_bboxes,const int* glabels,
 float* out_scores,int* out_labels,int* out_index,
-size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold,bool max_overlap_as_pos=true)
+size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold,bool max_overlap_as_pos=true,bool force_in_gtbox=false)
 {
     cuda_unique_ptr<int> g_out_index;
 
@@ -164,8 +215,16 @@ size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold,bool max_o
     dim3      grid1(gb_size);
     cuda_unique_ptr<bool> d_is_max_score = make_cuda_unique<bool>((unsigned char)(0x00),ab_size);
 
-    matcher_get_scores_and_indexs<<<grid,std::min<size_t>(kBlockSize,gb_size)>>>(gbboxes,anchor_bboxes,out_scores,out_index,gb_size,ab_size);
-    CHECK_CUDA_ERRORS(cudaPeekAtLastError());
+    if(force_in_gtbox)
+        matcher_get_scores_and_indexsv2<<<grid,std::min<size_t>(kBlockSize,gb_size)>>>(gbboxes,anchor_bboxes,out_scores,out_index,gb_size,ab_size);
+    else
+        matcher_get_scores_and_indexs<<<grid,std::min<size_t>(kBlockSize,gb_size)>>>(gbboxes,anchor_bboxes,out_scores,out_index,gb_size,ab_size);
+
+    auto res = cudaPeekAtLastError();
+    if(res != cudaError::cudaSuccess) {
+        CHECK_CUDA_ERRORS(res);
+        cout<<"CUDAERROR INFO:"<<ab_size<<","<<kBlockSize<<","<<gb_size<<endl;
+    }
     cudaDeviceSynchronize();
 
     if(max_overlap_as_pos) {

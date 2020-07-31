@@ -30,6 +30,7 @@ typedef Eigen::GpuDevice GPUDevice;
 
 /*
  * max_overlap_as_pos:是否将与ground truth bbox交叉面积最大的box设置为正样本
+ * force_in_gtbox: 是否强制正样本的中心点必须在相应的gtbox内
  * bottom_boxes:[1,X,4]/[batch_size,X,4](ymin,xmin,ymax,xmax) 候选box,相对坐标
  * bottom_gboxes:[batch_size,Y,4](ymin,xmin,ymax,xmax)ground truth box相对坐标
  * bottom_glabels:[batch_size,Y] 0为背景
@@ -43,6 +44,7 @@ REGISTER_OP("Matcher")
 	.Attr("pos_threshold:float")
 	.Attr("neg_threshold:float")
     .Attr("max_overlap_as_pos:bool")
+    .Attr("force_in_gtbox:bool=False")
     .Input("bottom_boxes: T")
     .Input("bottom_gboxes: T")
     .Input("bottom_glabels: int32")
@@ -72,6 +74,7 @@ class MatcherOp<CPUDevice,T>: public OpKernel {
 			OP_REQUIRES_OK(context, context->GetAttr("pos_threshold", &pos_threshold));
 			OP_REQUIRES_OK(context, context->GetAttr("neg_threshold", &neg_threshold));
 			OP_REQUIRES_OK(context, context->GetAttr("max_overlap_as_pos", &max_overlap_as_pos_));
+			OP_REQUIRES_OK(context, context->GetAttr("force_in_gtbox", &force_in_gtbox_));
 		}
 
 		void Compute(OpKernelContext* context) override
@@ -110,7 +113,7 @@ class MatcherOp<CPUDevice,T>: public OpKernel {
 			auto output_scores_tensor         =  output_scores->template tensor<T,2>();
 			auto output_indict_tensor         =  output_indict->template tensor<int,2>();
 
-            MatcherUnit<CPUDevice,T> encode_unit(pos_threshold,neg_threshold,max_overlap_as_pos_);
+            MatcherUnit<CPUDevice,T> encode_unit(pos_threshold,neg_threshold,max_overlap_as_pos_,force_in_gtbox_);
             auto shard = [&](int64 start,int64 limit){
                 for(auto i=start; i<limit; ++i) {
 
@@ -140,9 +143,10 @@ class MatcherOp<CPUDevice,T>: public OpKernel {
             }
         }
 	private:
-		float         pos_threshold;
-		float         neg_threshold;
-        bool          max_overlap_as_pos_ = true;
+		float pos_threshold;
+		float neg_threshold;
+		bool  max_overlap_as_pos_ = true;
+		bool  force_in_gtbox_     = false;
 };
 #ifdef GOOGLE_CUDA
 template <typename T>
@@ -152,6 +156,7 @@ class MatcherOp<GPUDevice,T>: public OpKernel {
 			OP_REQUIRES_OK(context, context->GetAttr("pos_threshold", &pos_threshold));
 			OP_REQUIRES_OK(context, context->GetAttr("neg_threshold", &neg_threshold));
 			OP_REQUIRES_OK(context, context->GetAttr("max_overlap_as_pos", &max_overlap_as_pos_));
+			OP_REQUIRES_OK(context, context->GetAttr("force_in_gtbox", &force_in_gtbox_));
 		}
 
 		void Compute(OpKernelContext* context) override
@@ -193,7 +198,7 @@ class MatcherOp<GPUDevice,T>: public OpKernel {
 			auto output_scores_tensor         =  output_scores->template tensor<T,2>();
 			auto output_indict_tensor         =  output_indict->template tensor<int,2>();
 
-            MatcherUnit<GPUDevice,T> encode_unit(pos_threshold,neg_threshold,max_overlap_as_pos_);
+            MatcherUnit<GPUDevice,T> encode_unit(pos_threshold,neg_threshold,max_overlap_as_pos_,force_in_gtbox_);
 
             for(auto i=0; i<batch_size; ++i) {
                     auto size    = bottom_gsize(i);
@@ -209,9 +214,10 @@ class MatcherOp<GPUDevice,T>: public OpKernel {
                 }
         }
 	private:
-		float         pos_threshold;
-		float         neg_threshold;
-        bool          max_overlap_as_pos_ = true;
+		float pos_threshold;
+		float neg_threshold;
+		bool  max_overlap_as_pos_ = true;
+		bool  force_in_gtbox_     = false;
 };
 #endif
 REGISTER_KERNEL_BUILDER(Name("Matcher").Device(DEVICE_CPU).TypeConstraint<float>("T"), MatcherOp<CPUDevice, float>);

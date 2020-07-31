@@ -794,6 +794,7 @@ REGISTER_KERNEL_BUILDER(Name("GetImageResizeSize").Device(DEVICE_CPU), GetImageR
 REGISTER_OP("FillBBoxes")
     .Attr("T: {float, double}")
     .Attr("v: float")
+    .Attr("include_last: bool=True")
     .Input("image: T")
     .Input("bboxes: T")
 	.Output("output:T")
@@ -807,6 +808,7 @@ class FillBoxesOp: public OpKernel {
 	public:
 		explicit FillBoxesOp(OpKernelConstruction* context) : OpKernel(context) {
 			OP_REQUIRES_OK(context, context->GetAttr("v", &v_));
+			OP_REQUIRES_OK(context, context->GetAttr("include_last", &include_last_));
 		}
 
 		void Compute(OpKernelContext* context) override
@@ -833,15 +835,29 @@ class FillBoxesOp: public OpKernel {
 
 		}
         template<typename IT>
-        void draw_a_box(IT& image,const Eigen::Tensor<T,1,Eigen::RowMajor>& box) {
-            for(auto x=box(1); x<=box(3); ++x) {
-                for(auto y=box(0); y<=box(2); ++y) {
-                    image(y,x) = v_;
-                }
+            void draw_a_box(IT& image,const Eigen::Tensor<T,1,Eigen::RowMajor>& box) {
+                //使用float结束，结果更准确
+                const auto xmin = max<int>(0,box(1));
+                const auto xmax = min<float>(image.dimension(1),box(3));
+                const auto ymin = max<int>(0,box(0));
+                const auto ymax = min<float>(image.dimension(0),box(2));
+
+                if(include_last_)
+                    for(int x=xmin; x<=xmax; ++x) {
+                        for(int y=ymin; y<=ymax; ++y) {
+                            image(y,x) = v_;
+                        }
+                    }
+                else
+                    for(int x=xmin; x<xmax; ++x) {
+                        for(int y=ymin; y<ymax; ++y) {
+                            image(y,x) = v_;
+                        }
+                    }
             }
-        }
 	private:
 		float v_ = 1.0;
+        bool include_last_ = true;
 
 };
 REGISTER_KERNEL_BUILDER(Name("FillBBoxes").Device(DEVICE_CPU).TypeConstraint<float>("T"), FillBoxesOp<CPUDevice, float>);

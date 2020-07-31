@@ -559,6 +559,8 @@ class RandomDistoredBoxesOp: public OpKernel {
 
 		void Compute(OpKernelContext* context) override
 		{
+            TIME_THISV1("RandomDistoredBoxes");
+
 			const Tensor &boxes      = context->input(0);
 			auto          boxes_flat = boxes.flat<T>();
 			const auto    nr         = boxes.dim_size(0);

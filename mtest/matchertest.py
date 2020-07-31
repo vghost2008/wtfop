@@ -7,7 +7,7 @@ import random
 import time
 import os
 import object_detection2.bboxes as odb
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '7'
 slim = tf.contrib.slim
 dev = ":/gpu:0"
 
@@ -210,6 +210,7 @@ class WTFOPTest(tf.test.TestCase):
                 target_out_labels = np.array([[0,1,3,4,0,2]])
                 target_out_indices = np.array([[-1,0,2,3,-1,1]])
                 target_out_scores = np.array([[0.,1.,0.87941164,0.67400867,0.,0.29750007]])
+                print("XXX",out_labels,out_indices,out_scores)
                 target_out_remove_indices = np.array([[True,False,False,False,False,False]])
                 keep_indices = np.logical_not(target_out_remove_indices)
                 self.assertAllEqual(a=target_out_remove_indices,b=out_remove_indices)
@@ -267,6 +268,51 @@ class WTFOPTest(tf.test.TestCase):
                 self.assertAllEqual(a=target_out_labels[keep_indices],b=out_labels[keep_indices])
                 mask = target_out_indices>0
                 self.assertAllClose(a=target_out_scores[mask],b=out_scores[mask],atol=1e-5,rtol=0.)
+
+    def testMatcher3(self):
+        config = tf.ConfigProto(allow_soft_placement=True)
+        with self.test_session(config=config) as sess:
+            with tf.device(dev):
+                max_overlap_as_pos = False
+                #人工核算
+                np_gboxes = np.array([[0.0, 0.0, 0.2, 0.2], [0.3, 0.3, 0.5, 0.6]]);
+                np_labels = np.array([1,2])
+                np_boxes = np.array([[0.1, 0.0, 0.21, 0.1], [0.3, 0.5, 0.4, 0.71]]);
+                np_lens = np.array([np_labels.shape[0]])
+                gboxes = tf.constant(np_gboxes,dtype=tf.float32)
+                glabels = tf.constant(np_labels);
+                boxes = tf.constant(np_boxes,dtype=tf.float32)
+                lens = tf.constant(np_lens,dtype=tf.int32)
+                boxes = tf.expand_dims(boxes,0)
+                gboxes = tf.expand_dims(gboxes,0)
+                glabels = tf.expand_dims(glabels,0)
+                out_labels0, out_scores0, indices0= matcher(
+                    boxes,
+                    gboxes,
+                    glabels,
+                    length=lens,
+                    pos_threshold=0.1,
+                    neg_threshold=0.1,
+                    max_overlap_as_pos=max_overlap_as_pos,
+                    force_in_gtbox=False)
+                out_labels1, out_scores1, indices1= matcher(
+                    boxes,
+                    gboxes,
+                    glabels,
+                    length=lens,
+                    pos_threshold=0.1,
+                    neg_threshold=0.1,
+                    max_overlap_as_pos=max_overlap_as_pos,
+                    force_in_gtbox=True)
+                out_remove_indices1 = tf.equal(out_labels1,-1)
+
+                out_labels1, out_labels0,out_scores, out_remove_indices,out_indices= sess.run([out_labels1, out_labels0,out_scores1, out_remove_indices1,indices1])
+                print(out_labels0,out_labels1)
+
+                target_out_labels0 = np.array([[1,2]])
+                target_out_labels1 = np.array([[0,0]])
+                self.assertAllEqual(a=target_out_labels0,b=out_labels0)
+                self.assertAllEqual(a=target_out_labels1,b=out_labels1)
 
 if __name__ == "__main__":
     random.seed(int(time.time()))

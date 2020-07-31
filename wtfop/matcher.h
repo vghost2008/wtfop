@@ -12,10 +12,11 @@ class MatcherUnit<Eigen::ThreadPoolDevice,T> {
 			int index; //与当前box对应的gbbox序号
 			float iou;//与其对应的gbbox的IOU
 		};
-		explicit MatcherUnit(float pos_threshold,float neg_threshold,bool max_overlap_as_pos=true) 
+		explicit MatcherUnit(float pos_threshold,float neg_threshold,bool max_overlap_as_pos=true,bool force_in_gtbox=false) 
 			:pos_threshold_(pos_threshold)
 			,neg_threshold_(neg_threshold)
-            ,max_overlap_as_pos_(max_overlap_as_pos){
+            ,max_overlap_as_pos_(max_overlap_as_pos)
+            ,force_in_gtbox_(force_in_gtbox) {
 			 }
 #ifdef PROCESS_BOUNDARY_ANCHORS
         template<typename _T>
@@ -23,6 +24,15 @@ class MatcherUnit<Eigen::ThreadPoolDevice,T> {
             return (box(0)<0.0) || (box(1)<0.0) || (box(2)>1.0) ||(box(3)>1.0);
         }
 #endif
+        template<typename _T>
+            inline bool is_in_gtbox(const _T& box,const _T& gtbox) {
+                if((box(0)<gtbox(0))
+                        || (box(1)<gtbox(1))
+                        || (box(2)>gtbox(2))
+                        || (box(3)>gtbox(3)))
+                    return false;
+                return true;
+            }
 		   auto operator()(
 		   const Eigen::Tensor<T,2,Eigen::RowMajor>& boxes,
 		   const Eigen::Tensor<T,2,Eigen::RowMajor>& gboxes,
@@ -67,15 +77,16 @@ class MatcherUnit<Eigen::ThreadPoolDevice,T> {
                          */
                         if(is_cross_boundaries(box)) continue;
 #endif
+                        if(force_in_gtbox_ && (!is_in_gtbox(box,gbox))) continue;
 
 						auto        jaccard   = bboxes_jaccardv1(gbox,box);
 
 						if(jaccard<MIN_SCORE_FOR_POS_BOX) continue;
 
-						if(jaccard>max_scores) {
-							max_scores = jaccard;
-							max_index = j;
-						}
+                        if(jaccard>max_scores) {
+                            max_scores = jaccard;
+                            max_index = j;
+                        }
 
 
                         {
@@ -125,21 +136,24 @@ class MatcherUnit<Eigen::ThreadPoolDevice,T> {
 				return std::make_tuple(out_labels,out_scores,outindex);
 			}
 	private:
-		const float              pos_threshold_;
-		const float              neg_threshold_;
-		bool                     max_overlap_as_pos_ = true;
+		const float pos_threshold_;
+		const float neg_threshold_;
+		bool        max_overlap_as_pos_ = true;
+		bool        force_in_gtbox_     = false;
 };
 #ifdef GOOGLE_CUDA
 void matcher_by_gpu(const float* gbboxes,const float* anchor_bboxes,const int* glabels,
 float* out_scores,int* out_labels,int* out_index,
-size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold,bool max_overlap_as_pos);
+size_t gb_size,size_t ab_size,float neg_threshold,float pos_threshold,bool max_overlap_as_pos,bool force_in_gtbox);
 template <typename T>
 class MatcherUnit<Eigen::GpuDevice,T> {
     public:
-        explicit MatcherUnit(float pos_threshold,float neg_threshold,bool max_overlap_as_pos) 
+        explicit MatcherUnit(float pos_threshold,float neg_threshold,bool max_overlap_as_pos,bool force_in_gtbox) 
             :pos_threshold_(pos_threshold)
              ,neg_threshold_(neg_threshold)
-             ,max_overlap_as_pos_(max_overlap_as_pos){
+             ,max_overlap_as_pos_(max_overlap_as_pos)
+             ,force_in_gtbox_(force_in_gtbox)
+             {
              }
         void operator()(
                 const T* boxes,const T* gboxes,const int* glabels,
@@ -149,12 +163,14 @@ class MatcherUnit<Eigen::GpuDevice,T> {
         {
             matcher_by_gpu(gboxes,boxes,glabels,
                     out_scores,out_labels,out_index,
-                    gdata_nr,data_nr,neg_threshold_,pos_threshold_,max_overlap_as_pos_);
+                    gdata_nr,data_nr,neg_threshold_,pos_threshold_,max_overlap_as_pos_,
+                    force_in_gtbox_);
         }
     private:
-        const float              pos_threshold_;
-        const float              neg_threshold_;
-        bool                     max_overlap_as_pos_ = true;
+        const float pos_threshold_;
+        const float neg_threshold_;
+        bool        max_overlap_as_pos_ = true;
+        bool        force_in_gtbox_     = false;
 };
 #else
 //#error "No cuda support"

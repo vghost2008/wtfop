@@ -42,6 +42,7 @@ top_pool = wtfop_module.top_pool
 make_neg_pair_index = wtfop_module.make_neg_pair_index
 center_boxes_filter= wtfop_module.center_boxes_filter
 fcos_boxes_encode = wtfop_module.fcos_boxes_encode
+fill_bboxes = wtfop_module.fill_b_boxes
 #deform_conv_op = wtfop_module.deform_conv_op
 #deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
 
@@ -214,13 +215,13 @@ def boxes_encode(bboxes, gboxes,glabels,length,pos_threshold=0.7,neg_threshold=0
     pos_threshold=pos_threshold,neg_threshold=neg_threshold,prio_scaling=prio_scaling,max_overlap_as_pos=max_overlap_as_pos)
     return out[0],out[1],out[2],out[3],out[4]
 
-def matcher(bboxes, gboxes,glabels,length,pos_threshold=0.7,neg_threshold=0.3,max_overlap_as_pos=True):
+def matcher(bboxes, gboxes,glabels,length,pos_threshold=0.7,neg_threshold=0.3,max_overlap_as_pos=True,force_in_gtbox=False):
     if glabels.dtype != tf.int32:
         glabels= tf.cast(glabels,tf.int32)
     if bboxes.get_shape().ndims != 3:
         bboxes = tf.expand_dims(bboxes,axis=0)
     out = wtfop_module.matcher(bottom_boxes=bboxes,bottom_gboxes=gboxes,bottom_glength=length,bottom_glabels=glabels,
-    pos_threshold=pos_threshold,neg_threshold=neg_threshold,max_overlap_as_pos=max_overlap_as_pos)
+    pos_threshold=pos_threshold,neg_threshold=neg_threshold,max_overlap_as_pos=max_overlap_as_pos,force_in_gtbox=force_in_gtbox)
     return out[0],out[1],out[2]
 
 def get_boxes_deltas(boxes, gboxes,labels,indices,scale_weights=[10,10,5,5]):
@@ -405,9 +406,6 @@ def median_blur(image,ksize=5):
 
 def bilateral_filter(image,d=5,sigmaColor=5,sigmaSpace=4):
     return wtfop_module.bilateral_filter(image=image,d=d,sigmaColor=sigmaColor,sigmaSpace=sigmaSpace)
-
-def fill_bboxes(image,bboxes,v=1.0):
-    return wtfop_module.fill_b_boxes(image=image,bboxes=bboxes,v=v)
 
 #OCR ops
 def merge_character(bboxes, labels,dlabels, expand=0.01,super_box_type=68,space_type=69):
