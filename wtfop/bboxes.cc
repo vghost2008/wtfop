@@ -545,9 +545,12 @@ class RandomDistoredBoxesOp: public OpKernel {
 	private:
 	public:
 		explicit RandomDistoredBoxesOp(OpKernelConstruction* context) : OpKernel(context) {
-			OP_REQUIRES_OK(context, context->GetAttr("limits", &limits_));
+		    vector<float> limits;
+			OP_REQUIRES_OK(context, context->GetAttr("limits", &limits));
 			OP_REQUIRES_OK(context, context->GetAttr("size", &size_));
 			OP_REQUIRES_OK(context, context->GetAttr("keep_org", &keep_org_));
+            for(auto x:limits)
+                limits_.push_back(sqrt(x));
 		}
         inline int get_output_nr(int nr)const {
             auto    output_nr  = 0; 
@@ -605,33 +608,19 @@ class RandomDistoredBoxesOp: public OpKernel {
 						output_index);
 			}
 		}
-		void process(const T* src_boxes,T* out_boxes,int nr,float xoffset,float yoffset,float scale,int& output_index) 
-		{
-            for(auto k=0; k<nr; ++k) {
-                const auto src_box = src_boxes+4*k;
-				const auto sdx      = (src_box[3]-src_box[1]) *scale/2.;
-				const auto sdy      = (src_box[2]-src_box[0]) *scale/2.;
-                const auto dx      = (src_box[3]-src_box[1])*xoffset;
-                const auto dy      = (src_box[2]-src_box[0])*yoffset;
-                auto       cur_box = out_boxes+4 *output_index++;
-
-                copy_box(src_box,cur_box);
-				cur_box[0] += dy-sdy;
-				cur_box[1] += dx-sdx;
-				cur_box[2] += dy+sdy;
-				cur_box[3] += dx+sdx;
-            }
-		}
         template<typename dis_t,typename gen_t>
 		void process(const T* src_boxes,T* out_boxes,int nr,dis_t& xoffset,dis_t& yoffset,dis_t& scale,gen_t& gen,int& output_index) 
 		{
             for(auto k=0; k<nr; ++k) {
-                const auto src_box = src_boxes+4*k;
-				const auto sdx     = (src_box[3]-src_box[1]) *scale(gen)/2.;
-				const auto sdy     = (src_box[2]-src_box[0]) *scale(gen)/2.;
-                const auto dx      = (src_box[3]-src_box[1])*xoffset(gen);
-                const auto dy      = (src_box[2]-src_box[0])*yoffset(gen);
-                auto       cur_box = out_boxes+4 *output_index++;
+                const auto src_box  = src_boxes+4 *k;
+                const auto rxoffset = spow(xoffset(gen));
+                const auto ryoffset = spow(yoffset(gen));
+                const auto rscale   = spow(scale(gen))/2;
+                const auto sdx      = (src_box[3]-src_box[1])*rscale;
+                const auto sdy      = (src_box[2]-src_box[0])*rscale;
+                const auto dx       = (src_box[3]-src_box[1]) *rxoffset;
+                const auto dy       = (src_box[2]-src_box[0]) *ryoffset;
+                auto       cur_box  = out_boxes+4 *output_index++;
 
                 copy_box(src_box,cur_box);
 				cur_box[0] += dy-sdy;
@@ -641,6 +630,11 @@ class RandomDistoredBoxesOp: public OpKernel {
                 ba::clamp_range(cur_box,cur_box+4,cur_box,0.0f,1.0f);
             }
 		}
+        inline float spow(float x) {
+            if(x<0)
+                return -x*x;
+            return x*x;
+        }
 	private:
 		int           size_;
 		vector<float> limits_;

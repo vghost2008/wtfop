@@ -43,6 +43,7 @@ make_neg_pair_index = wtfop_module.make_neg_pair_index
 center_boxes_filter= wtfop_module.center_boxes_filter
 fcos_boxes_encode = wtfop_module.fcos_boxes_encode
 fill_bboxes = wtfop_module.fill_b_boxes
+his_random_select = wtfop_module.his_random_select
 #deform_conv_op = wtfop_module.deform_conv_op
 #deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
 

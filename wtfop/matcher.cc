@@ -222,5 +222,5 @@ class MatcherOp<GPUDevice,T>: public OpKernel {
 #endif
 REGISTER_KERNEL_BUILDER(Name("Matcher").Device(DEVICE_CPU).TypeConstraint<float>("T"), MatcherOp<CPUDevice, float>);
 #ifdef GOOGLE_CUDA
-REGISTER_KERNEL_BUILDER(Name("Matcher").Device(DEVICE_GPU).TypeConstraint<float>("T"), MatcherOp<GPUDevice, float>);
+//REGISTER_KERNEL_BUILDER(Name("Matcher").Device(DEVICE_GPU).TypeConstraint<float>("T"), MatcherOp<GPUDevice, float>);
 #endif

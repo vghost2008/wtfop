@@ -77,13 +77,15 @@ class MatcherUnit<Eigen::ThreadPoolDevice,T> {
                          */
                         if(is_cross_boundaries(box)) continue;
 #endif
-                        if(force_in_gtbox_ && (!is_in_gtbox(box,gbox))) continue;
+                        bool is_good = true;
+                        if(force_in_gtbox_ && (!is_in_gtbox(box,gbox))) 
+                            is_good = false;
 
 						auto        jaccard   = bboxes_jaccardv1(gbox,box);
 
 						if(jaccard<MIN_SCORE_FOR_POS_BOX) continue;
 
-                        if(jaccard>max_scores) {
+                        if((jaccard>max_scores) && is_good) {
                             max_scores = jaccard;
                             max_index = j;
                         }
@@ -94,12 +96,22 @@ class MatcherUnit<Eigen::ThreadPoolDevice,T> {
 
 						    auto       &iou_index = iou_indexs[j];
 
-                            if(jaccard>iou_index.iou) {
-                                iou_index.iou = jaccard;
-                                iou_index.index = i;
-                                out_scores(j)  =  jaccard;
-                                out_labels(j)  =  glabel;
-                                outindex(j)    =  i;
+                            if(is_good) {
+                                if(jaccard>iou_index.iou) {
+                                    iou_index.iou = jaccard;
+                                    iou_index.index = i;
+                                    out_scores(j)  =  jaccard;
+                                    out_labels(j)  =  glabel;
+                                    outindex(j)    =  i;
+                                }
+                            } else {
+                                /*
+                                 * 输出有效的scores，可以用于指导负样本按iou采样
+                                 */
+                                if((jaccard>iou_index.iou) && (out_labels(j)<=0)) {
+                                    iou_index.iou = jaccard;
+                                    out_scores(j)  =  jaccard;
+                                }
                             }
                         }
 					}
