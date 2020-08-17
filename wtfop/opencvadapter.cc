@@ -217,23 +217,28 @@ class MinAreaRectOp: public OpKernel {
 			OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
             auto      o_tensor = output_tensor->template tensor<float,3>();
 
-            for(auto i=0; i<batch_size; ++i) {
-                auto rect = getRotatedRect(input_image+i*img_height*img_width,img_height,img_width);
+            o_tensor.setZero();
 
-                if(res_points_) {
-                    cv::Point2f P[4];
-                    rect.points(P);
-                    for(auto j=0; j<4; ++j) {
-                        o_tensor(i,j,0) = P[j].x;
-                        o_tensor(i,j,1) = P[j].y;
+            for(auto i=0; i<batch_size; ++i) {
+                try{
+                    auto rect = getRotatedRect(input_image+i*img_height*img_width,img_height,img_width);
+
+                    if(res_points_) {
+                        cv::Point2f P[4];
+                        rect.points(P);
+                        for(auto j=0; j<4; ++j) {
+                            o_tensor(i,j,0) = P[j].x;
+                            o_tensor(i,j,1) = P[j].y;
+                        }
+                    } else {
+                        o_tensor(i,0,0) = rect.center.x;
+                        o_tensor(i,0,1) = rect.center.y;
+                        o_tensor(i,1,0) = rect.size.width;
+                        o_tensor(i,1,1) = rect.size.height;
+                        o_tensor(i,2,0) = rect.angle;
+                        o_tensor(i,2,1) = 0;
                     }
-                } else {
-                    o_tensor(i,0,0) = rect.center.x;
-                    o_tensor(i,0,1) = rect.center.y;
-                    o_tensor(i,1,0) = rect.size.width;
-                    o_tensor(i,1,1) = rect.size.height;
-                    o_tensor(i,2,0) = rect.angle;
-                    o_tensor(i,2,1) = 0;
+                } catch(...) {
                 }
             }
         }

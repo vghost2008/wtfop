@@ -981,8 +981,8 @@ REGISTER_KERNEL_BUILDER(Name("RandomSelect").Device(DEVICE_CPU), RandomSelectOp<
  * output: [select_nr]
  */
 REGISTER_OP("HisRandomSelect")
-    .Attr("T: {float, double}")
-    .Attr("his_nr: int")
+    .Attr("T: {float, double,int32}")
+    .Attr("his_nr: int=0")
     .Attr("min: float=0")
     .Attr("max: float=0")
     .Attr("const_min_max: bool=True")
@@ -1006,6 +1006,7 @@ class HisRandomSelectOp: public OpKernel {
 			OP_REQUIRES_OK(context, context->GetAttr("min", &min_));
 			OP_REQUIRES_OK(context, context->GetAttr("const_min_max", &const_min_max_));
 			OP_REQUIRES_OK(context, context->GetAttr("sort_indices", &sort_indices_));
+            std::srand(std::time(nullptr)); // use current time as seed for random generator
 		}
 
 		void Compute(OpKernelContext* context) override
@@ -1036,6 +1037,9 @@ class HisRandomSelectOp: public OpKernel {
             const auto delta = (max_-min_)/his_nr_;
             const auto bin_nr = select_nr/his_nr_;
             auto    out_data = output_indices->template flat<int>().data();
+            vector<int> unused_index;
+
+            unused_index.reserve(max<int>(16,data_nr-select_nr));
 
             for(auto i=0; i<data_nr; ++i) {
                 int idx = (tensor[i]-min_)/delta;
@@ -1047,22 +1051,49 @@ class HisRandomSelectOp: public OpKernel {
             int total_res_nr = 0;
             for(auto i=0; i<his_nr_; ++i) {
                 auto& tmp_indices = indices[i];
-                auto tmp_data = random_select(tmp_indices.begin(),tmp_indices.end(),bin_nr);
+                auto tmp_data = random_select(tmp_indices.begin(),tmp_indices.end(),bin_nr,&unused_index);
                 copy(tmp_data.begin(),tmp_data.end(),out_data+total_res_nr);
                 total_res_nr += tmp_data.size();
             }
             if(total_res_nr<select_nr) {
                 const auto tmp_sel_nr = select_nr-total_res_nr;
-                vector<int> tmp_tensor(data_nr);
-                copy(tensor,tensor+data_nr,tmp_tensor.begin());
-                auto tmp_data = random_select(tmp_tensor.begin(),tmp_tensor.end(),tmp_sel_nr);
-                copy(tmp_data.begin(),tmp_data.end(),out_data+total_res_nr);
+                if(unused_index.size()>=tmp_sel_nr) {
+                    auto tmp_data = random_select(unused_index.begin(),unused_index.end(),tmp_sel_nr);
+                    copy(tmp_data.begin(),tmp_data.end(),out_data+total_res_nr);
+                } else {
+                    vector<int> tmp_tensor(data_nr);
+                    //copy(tensor,tensor+data_nr,tmp_tensor.begin());
+                    generate(tmp_tensor.begin(),tmp_tensor.end(),[n=0]()mutable{return n++;});
+                    auto tmp_data = random_select_v2(tmp_tensor.begin(),tmp_tensor.end(),tmp_sel_nr);
+                    copy(tmp_data.begin(),tmp_data.end(),out_data+total_res_nr);
+                }
             }
             if(sort_indices_)
                 sort(out_data,out_data+select_nr);
 		}
         template<typename IT>
-        vector<int> random_select(IT begin, IT end, int nr) {
+        vector<int> random_select(IT begin, IT end, int nr,vector<int>* unused_index=nullptr) {
+            vector<int> res;
+            const auto input_nr = distance(begin,end);
+
+            if((0 == input_nr) || (nr==0))
+                return res;
+
+            res.reserve(nr);
+
+            std::random_shuffle(begin,end);
+
+            if(nr<input_nr) {
+                res.insert(res.end(),begin,next(begin,nr));
+                if(nullptr != unused_index)
+                    unused_index->insert(unused_index->end(),next(begin,nr),end);
+            } else {
+                res.insert(res.end(),begin,end);
+            }
+            return res;
+        }
+        template<typename IT>
+        vector<int> random_select_v2(IT begin, IT end, int nr) {
             vector<int> res;
             const auto input_nr = distance(begin,end);
 
@@ -1076,7 +1107,6 @@ class HisRandomSelectOp: public OpKernel {
             if(nr<=input_nr) {
                 res.insert(res.end(),begin,next(begin,nr));
             } else {
-                cout<<"No enough data "<<input_nr<<" vs "<<nr<<endl;
                 auto repeat_nr = nr/input_nr;
                 for(auto i=0; i<repeat_nr; ++i) {
                     res.insert(res.end(),begin,end);
@@ -1094,4 +1124,125 @@ class HisRandomSelectOp: public OpKernel {
         float max_           = 0;
         bool  sort_indices_  = false;
 };
+/*
+ * int特化版本
+ * 针对每一个值取相同的数量的样本
+ */
+template <typename Device>
+class HisRandomSelectOp<Device,int>: public OpKernel {
+    using T = int;
+	public:
+		explicit HisRandomSelectOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("sort_indices", &sort_indices_));
+            std::srand(std::time(nullptr)); // use current time as seed for random generator
+		}
+
+		void Compute(OpKernelContext* context) override
+		{
+            const Tensor &_tensor        = context->input(0);
+            auto          tensor         = _tensor.template flat<T>().data();
+            auto          data_nr        = _tensor.dim_size(0);
+            const Tensor &_select_nr     = context->input(1);
+            auto          select_nr      = _select_nr.template flat<int>().data()[0];
+            Tensor       *output_indices = NULL;
+            int           dim1[]         = {select_nr};
+            TensorShape   output_shape;
+
+            TensorShapeUtils::MakeShape(dim1,1,&output_shape);
+
+			OP_REQUIRES(context, _tensor.dims() == 1, errors::InvalidArgument("data must be at 1-dimensional"));
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_indices));
+
+            map<int,vector<int>> indices;
+            auto    out_data = output_indices->template flat<int>().data();
+            vector<int> unused_index;
+
+            unused_index.reserve(max<int>(16,data_nr-select_nr));
+
+            for(auto i=0; i<data_nr; ++i) {
+                const int key = tensor[i];
+                if(indices.find(key) == indices.end())
+                    indices[key] = vector<int>();
+                indices[key].push_back(i);
+            }
+
+            int total_res_nr = 0;
+            const int bin_nr = select_nr/indices.size();
+
+            if(bin_nr>0) {
+                for(auto it=indices.begin(); it != indices.end(); ++it) {
+                    auto& tmp_indices = it->second;
+                    auto tmp_data = random_select(tmp_indices.begin(),tmp_indices.end(),bin_nr,&unused_index);
+                    copy(tmp_data.begin(),tmp_data.end(),out_data+total_res_nr);
+                    total_res_nr += tmp_data.size();
+                }
+            }
+
+            if(total_res_nr<select_nr) {
+                const auto tmp_sel_nr = select_nr-total_res_nr;
+                if(unused_index.size()>=tmp_sel_nr) {
+                    auto tmp_data = random_select(unused_index.begin(),unused_index.end(),tmp_sel_nr);
+                    copy(tmp_data.begin(),tmp_data.end(),out_data+total_res_nr);
+                } else {
+                    vector<int> tmp_tensor(data_nr);
+                    generate(tmp_tensor.begin(),tmp_tensor.end(),[n=0]()mutable{return n++;});
+                    auto tmp_data = random_select_v2(tmp_tensor.begin(),tmp_tensor.end(),tmp_sel_nr);
+                    copy(tmp_data.begin(),tmp_data.end(),out_data+total_res_nr);
+                }
+            }
+            if(sort_indices_)
+                sort(out_data,out_data+select_nr);
+		}
+
+        template<typename IT>
+        vector<int> random_select(IT begin, IT end, int nr,vector<int>* unused_index=nullptr) {
+            vector<int> res;
+            const auto input_nr = distance(begin,end);
+
+            if((0 == input_nr) || (nr==0))
+                return res;
+
+            res.reserve(nr);
+
+            std::random_shuffle(begin,end);
+
+            if(nr<input_nr) {
+                res.insert(res.end(),begin,next(begin,nr));
+                if(nullptr != unused_index)
+                    unused_index->insert(unused_index->end(),next(begin,nr),end);
+            } else {
+                res.insert(res.end(),begin,end);
+            }
+            return res;
+        }
+        template<typename IT>
+        vector<int> random_select_v2(IT begin, IT end, int nr) {
+            vector<int> res;
+            const auto input_nr = distance(begin,end);
+
+            if((0 == input_nr) || (nr==0))
+                return res;
+
+            res.reserve(nr);
+
+            std::random_shuffle(begin,end);
+
+            if(nr<=input_nr) {
+                res.insert(res.end(),begin,next(begin,nr));
+            } else {
+                auto repeat_nr = nr/input_nr;
+                for(auto i=0; i<repeat_nr; ++i) {
+                    res.insert(res.end(),begin,end);
+                }
+                
+                repeat_nr = nr-res.size();
+                res.insert(res.end(),begin,next(begin,repeat_nr));
+            }
+            return res;
+        }
+	private:
+        bool  sort_indices_  = false;
+};
 REGISTER_KERNEL_BUILDER(Name("HisRandomSelect").Device(DEVICE_CPU).TypeConstraint<float>("T"), HisRandomSelectOp<CPUDevice,float>);
+REGISTER_KERNEL_BUILDER(Name("HisRandomSelect").Device(DEVICE_CPU).TypeConstraint<int>("T"), HisRandomSelectOp<CPUDevice,int>);

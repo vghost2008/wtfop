@@ -8,7 +8,7 @@ import tensorflow
 
 class MyInstall(DistutilsInstall):
     def run(self):
-        subprocess.call(['make', '-C', 'wtfop', 'build'])
+        subprocess.call(['make', '-C', 'wtfop', 'build','-j16'])
         DistutilsInstall.run(self)
 
 setup(name='wtfop',

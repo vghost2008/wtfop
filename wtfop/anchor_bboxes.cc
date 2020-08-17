@@ -29,7 +29,7 @@ typedef Eigen::ThreadPoolDevice CPUDevice;
  * scales use pixel unit (128,128), then size use input image size (640,800)
  * output:
  * [out_nr,4], out_nr=len(scales)*len(aspect_ratios)*shape[0]*shape[1]
- * 表示每个位置，每个比率，每个尺寸的anchor box
+ * 表示每个位置，每个比率，每个尺寸的anchor box, 使用相对坐标
  * 即[box0(s0,r0),box1(s1,r0),box2(s0,r1),box3(s1,r1),...]
  */
 REGISTER_OP("AnchorGenerator")
