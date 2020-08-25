@@ -110,6 +110,35 @@ float bboxes_jaccard_of_box0v1(const T0& box0, const T1& box1)
 
 	return int_vol/box0_vol;
 }
+template<typename T0,typename T1,typename T2>
+void bboxes_envelope(const T0& box0, const T1& box1,T2& box2)
+{
+	const auto ymin = std::min(box0(0),box1(0));
+	const auto xmin = std::min(box0(1),box1(1));
+	const auto ymax = std::max(box0(2),box1(2));
+	const auto xmax = std::max(box0(3),box1(3));
+
+    box2(0) = ymin;
+    box2(1) = xmin;
+    box2(2) = ymax;
+    box2(3) = xmax;
+}
+template<typename T0,typename T2>
+void bboxes_envelope(const std::vector<T0>& bboxes, T2& box2)
+{
+    if(bboxes.size()==1) {
+        box2 = bboxes[0];
+        return;
+    }
+    if(bboxes.size()==2) {
+        return bboxes_envelope(bboxes[0],bboxes[1],box2);
+    }
+    box2 = bboxes[0];
+    for(auto i=1; i<bboxes.size(); ++i) {
+        bboxes_envelope(box2,bboxes[i],box2);
+    }
+}
+
 /*
  * box:ymin,xmin,ymax,xmax
  * return:cy,cx,h,w

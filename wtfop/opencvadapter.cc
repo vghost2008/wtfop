@@ -173,6 +173,8 @@ REGISTER_KERNEL_BUILDER(Name("BilateralFilter").Device(DEVICE_CPU).TypeConstrain
  * [N,4,2] 分别为[[[p0.x,p0.y],[p1.x,p1.y],..[p3.x,p3.y]],[....]]]
  * 当res_points==False时:
  * [N,3,2] 分别为[[[center.x,center.y],[width,height],[angle,_]],[.....]]]
+ * 旋转角度θ是水平轴（x轴）逆时针旋转，与碰到的矩形的第一条边的夹角。并且这个边的边长是width，另一条边边长是height。也就是说，在这里，width与height不是按照长短来定义的。
+ * 在opencv中，坐标系原点在左上角，相对于x轴，逆时针旋转角度为负，顺时针旋转角度为正。所以，θ∈（-90度，0]
  */
 REGISTER_OP("MinAreaRect")
     .Attr("T: {uint8}")

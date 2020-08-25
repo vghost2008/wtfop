@@ -25,6 +25,7 @@ ops.NotDifferentiable("AdjacentMatrixGenerator")
 ops.NotDifferentiable("BoxesMatchWithPred")
 ops.NotDifferentiable("SampleLabels")
 ops.NotDifferentiable("GetBoxesDeltas")
+ops.NotDifferentiable("ItemAssign")
 
 module_path = os.path.realpath(__file__)
 module_dir = os.path.dirname(module_path)
@@ -44,6 +45,9 @@ center_boxes_filter= wtfop_module.center_boxes_filter
 fcos_boxes_encode = wtfop_module.fcos_boxes_encode
 fill_bboxes = wtfop_module.fill_b_boxes
 his_random_select = wtfop_module.his_random_select
+item_assign= wtfop_module.item_assign
+qc_post_process = wtfop_module.qc_post_process 
+merge_instance_by_mask = wtfop_module.merge_instance_by_mask 
 #deform_conv_op = wtfop_module.deform_conv_op
 #deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
 

@@ -436,9 +436,11 @@ class WTFOPTest(tf.test.TestCase):
             imgs = np.stack(img, axis=0)
 
             res = wop.min_area_rect(imgs, res_points=True)
+            res1 = wop.min_area_rect(imgs, res_points=False)
             sess.run(tf.global_variables_initializer())
-            res = sess.run(res)
+            res,res1 = sess.run([res,res1])
             self.assertAllClose(res,target_points,atol=1e-3)
+            print("X:",res1)
 
     def test_min_area_rect1(self):
         with self.test_session() as sess:
@@ -541,6 +543,23 @@ class WTFOPTest(tf.test.TestCase):
                                      [[0,1], [-1,-1], [-1,-1], [-1,-1], [-1,-1], [-1,-1]] ,
                                      [[0,1], [0,2], [0,3], [1,2], [1,3], [2,3]]])
             self.assertAllEqual(index,target_index)
+
+    '''def test_item_assign(self):
+        with self.test_session() as sess:
+            a = range(16)
+            a = np.array(a)
+            a = np.reshape(a,[4,4])
+            value = [[2,2],[2,2]]
+            a = tf.constant(a,dtype=tf.float32)
+            value = tf.constant(value,dtype=tf.float32)
+            index = tf.constant([[1,3],[1,3]],dtype=tf.int32)
+            b = wop.item_assign(tensor=a,v=value,index=index)
+            b = sess.run(b)
+            target_b = np.array([[0.0,1.0,2.0,3.0],
+                                 [4.0,2.0,2.0,7.0],
+                                 [8.0,2.0,2.0,11.0],
+                                 [12.0,13.0,14.0,15.0]])
+            self.assertAllClose(b,target_b,atol=1e-4)'''
 
 if __name__ == "__main__":
     random.seed(int(time.time()))

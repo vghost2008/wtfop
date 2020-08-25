@@ -1246,3 +1246,461 @@ class HisRandomSelectOp<Device,int>: public OpKernel {
 };
 REGISTER_KERNEL_BUILDER(Name("HisRandomSelect").Device(DEVICE_CPU).TypeConstraint<float>("T"), HisRandomSelectOp<CPUDevice,float>);
 REGISTER_KERNEL_BUILDER(Name("HisRandomSelect").Device(DEVICE_CPU).TypeConstraint<int>("T"), HisRandomSelectOp<CPUDevice,int>);
+/*
+data:输入Tensor,shape为[X,Y]
+输出:output shape为[X*(1+expand_nr),Y]
+如输入[[1,2],
+[3,4]]
+expand_nr = 2:
+输出:
+[[1,2],
+[1,2],
+[1,2],
+[3,4],
+[3,4],
+[3,4]]
+*/
+REGISTER_OP("ExpandTensor")
+    .Attr("T: {int32, int64,float32,float64}")
+	.Attr("expand_nr:int")
+    .Input("data: T")
+	.Output("output:T")
+    .SetShapeFn([](shape_inference::InferenceContext* c){
+            auto dims_data0 = c->input(0);
+            int expand_nr = 0;
+            c->GetAttr("expand_nr",&expand_nr);
+            auto batch_size = c->Value(c->Dim(dims_data0,0))*(1+expand_nr);
+            auto output_shape0 = c->Matrix(batch_size,c->Dim(dims_data0,1));
+
+            c->set_output(0,output_shape0);
+            return Status::OK();
+            });
+
+template <typename Device, typename T>
+class ExpandTensorOp: public OpKernel {
+	public:
+		explicit ExpandTensorOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context,
+					context->GetAttr("expand_nr", &expand_nr));
+		}
+
+		void Compute(OpKernelContext* context) override
+		{
+			const Tensor &data= context->input(0);
+			auto          data_flat = data.flat<T>();
+
+			OP_REQUIRES(context, data.dims() == 2, errors::InvalidArgument("data data must be 2-dimensional"));
+
+			const auto batch_size   = data.dim_size(0);
+			const auto num_output   = batch_size *(1+expand_nr);
+			const auto data_len = data.dim_size(1);
+
+			TensorShape output_shape0({num_output,data_len});
+
+			Tensor* output_data = NULL;
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, output_shape0, &output_data));
+
+			auto oq_flat = output_data->flat<T>();
+
+			for(auto i=0; i<batch_size; ++i) {
+				auto bq_i = data_flat.data()+data_len*i;
+				auto bq_o = oq_flat.data()+data_len*i*(expand_nr+1);
+				for(auto k=0; k<=expand_nr; ++k) {
+					for(auto j=0; j<data_len; ++j) {
+						bq_o[j] = bq_i[j];
+					}
+					bq_o += data_len;
+				}
+			}
+		}
+	private:
+		int expand_nr;
+};
+REGISTER_KERNEL_BUILDER(Name("ExpandTensor").Device(DEVICE_CPU).TypeConstraint<int32_t>("T"), ExpandTensorOp<CPUDevice, int32_t>);
+REGISTER_KERNEL_BUILDER(Name("ExpandTensor").Device(DEVICE_CPU).TypeConstraint<float>("T"), ExpandTensorOp<CPUDevice, float>);
+REGISTER_KERNEL_BUILDER(Name("ExpandTensor").Device(DEVICE_CPU).TypeConstraint<double>("T"), ExpandTensorOp<CPUDevice, double>);
+Status slide_batch_shape(shape_inference::InferenceContext* c) 
+{
+    auto                         shape        = c->input(0);
+    auto                         filter_shape = c->input(1);
+    string                       padding;
+    vector<int>                  strides;
+    shape_inference::ShapeHandle output;
+
+    c->GetAttr("padding",&padding);
+    c->GetAttr("strides",&strides);
+
+    auto org_h = c->Value(c->Dim(shape,0));
+    auto org_w = c->Value(c->Dim(shape,1));
+
+    if(padding == "SAME") {
+        org_h += (c->Value(c->Dim(filter_shape,0))-1);
+        org_w += (c->Value(c->Dim(filter_shape,1))-1);
+    }
+
+    const auto h_size =  (org_h-c->Value(c->Dim(filter_shape,0)))/strides[0]+1;
+    const auto w_size =  (org_w-c->Value(c->Dim(filter_shape,1)))/strides[1]+1;
+
+
+    c->Concatenate(c->MakeShape({h_size,w_size}),shape,&output);
+    c->set_output(0,output);
+
+    return Status::OK();
+}
+/*
+ * 输入一个[H,W,C]或[H,W]的tensor
+ * 输出一个[H1,W1,H,W,C]的tensor
+ * filter:[h,w,c]或[h,w]
+ * H1,W1指定的每一个tensor都是原tensor在相应位置与filter相乘的结果
+ */
+REGISTER_OP("SlideBatch")
+    .Attr("T: {int32, int64,float32,float64}")
+	.Attr("strides:list(int)")
+	.Attr("padding:string")
+    .Input("data: T")
+    .Input("filter: T")
+	.Output("output:T")
+	.SetShapeFn(slide_batch_shape);
+
+template <typename Device, typename T>
+class SlideBatchOp: public OpKernel {
+	public:
+		explicit SlideBatchOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("strides", &strides_));
+			OP_REQUIRES_OK(context, context->GetAttr("padding", &padding_));
+		}
+        inline bool is_same() const {
+            return padding_ == "SAME";
+        }
+        inline bool is_valid()const {
+            return !is_same();
+        }
+        inline int h_stride()const { return strides_[0]; }
+        inline int w_stride()const { return strides_[1]; }
+		inline int h_begin(int fh)const { 
+			if(is_same())
+				return (1-fh)/2;
+			else
+				return 0;
+		}
+		inline int h_end(int fh,int h)const { 
+			if(is_same())
+				return h-1;
+			else
+				return h-fh+1;
+		}
+        inline int w_begin(int fw)const { 
+			if(is_same())
+				return (1-fw)/2;
+			else
+				return 0;
+        }
+        inline int w_end(int fw,int w)const { 
+			if(is_same())
+				return w-1;
+			else
+				return w-fw+1;
+        }
+        inline size_t output_h_size(int fh,int h) const {
+            return (h_end(fh,h)-h_begin(fh))/h_stride();
+        }
+        inline size_t output_w_size(int fw,int w) const {
+            return (w_end(fw,w)-w_begin(fw))/w_stride();
+        }
+		void Compute(OpKernelContext* context) override
+		{
+			const Tensor &data   = context->input(0);
+			const Tensor &filter = context->input(1);
+			const int     fh     = filter.dim_size(0);
+			const int     fw     = filter.dim_size(1);
+            Eigen::Tensor<T, 3,Eigen::RowMajor>  data_t = data.template tensor<T,3>();
+            Eigen::Tensor<T,3,Eigen::RowMajor> filter_t = filter.template tensor<T,3>();
+
+			auto      data_flat   = data.flat<T>();
+			auto      filter_flat = filter.flat<T>();
+			const int h           = data_t.dimension(0);
+			const int w           = data_t.dimension(1);
+			const int c           = data_t.dimension(2);
+			const int oh          = output_h_size(fh,h);
+			const int ow          = output_w_size(fw,w);
+
+			TensorShape output_shape0({oh,ow,data.dim_size(0),data.dim_size(1),c});
+			cout<<"oh="<<oh<<", ow="<<ow<<endl;
+
+			Tensor* output_data = NULL;
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, output_shape0, &output_data));
+
+			auto      oq_tensor = output_data->template tensor<T,5>();
+			const int size[]    = {h,w,c};
+
+            for(auto i=0; i<oh; ++i) {
+                for(auto j=0; j<ow; ++j) {
+                    Eigen::array<int, 3> offsets = {h_begin(fh)+h_stride()*i,w_begin(fw)+w_stride()*j,0};
+                    Eigen::array<int, 3> extents = {fh, fw,c};
+                    Eigen::array<int, 3> offsets1 = {0,0};
+
+					correct(offsets,extents,offsets1,size);
+
+                    auto v      = data_t.slice(offsets, extents) *filter_t.slice(offsets1,extents);
+                    auto target = oq_tensor.chip(i,0).chip(j,0);
+
+					target                         =  data_t;
+					target.slice(offsets,extents)  =  v;
+                }
+            }
+		}
+		static void correct(Eigen::array<int,3>& offsets,Eigen::array<int,3>& extents, Eigen::array<int,3>& offsets1,const int size[3] ) {
+			for(auto i=0; i<3; ++i) {
+				if(offsets[i]< 0) {
+				extents[i] = offsets[i]+extents[i];
+				offsets1[i] = -offsets[i];
+				offsets[i] = 0;
+				} else  if(offsets[i]+extents[i] > size[i]) {
+					extents[i] = size[i]-offsets[i];
+				}
+			}
+		}
+	private:
+		vector<int> strides_;
+		string      padding_;
+};
+REGISTER_KERNEL_BUILDER(Name("SlideBatch").Device(DEVICE_CPU).TypeConstraint<int32_t>("T"), SlideBatchOp<CPUDevice, int32_t>);
+REGISTER_KERNEL_BUILDER(Name("SlideBatch").Device(DEVICE_CPU).TypeConstraint<float>("T"), SlideBatchOp<CPUDevice, float>);
+REGISTER_KERNEL_BUILDER(Name("SlideBatch").Device(DEVICE_CPU).TypeConstraint<double>("T"), SlideBatchOp<CPUDevice, double>);
+
+/*
+ * 输入data 1D:Tensor
+ * padding:表示在axis 0上进行对称padding的数量,负数或0表示无操作
+ * 如果原有数据的数量为0， 则使用0填充
+ */
+REGISTER_OP("WPad")
+    .Attr("T: {int32, int64,float32,float64}")
+    .Input("tensor: T")
+    .Input("padding: int32")
+	.Output("data:T");
+
+template <typename Device, typename T>
+class WPadOp: public OpKernel {
+	public:
+		explicit WPadOp(OpKernelConstruction* context) : OpKernel(context) {
+		}
+		void Compute(OpKernelContext* context) override
+		{
+			const Tensor &_data    = context->input(0);
+			const Tensor &_padding = context->input(1);
+			auto          data     = _data.template flat<T>().data();
+			auto          padding  = _padding.template flat<int>().data();
+			const auto    data_nr  = _data.dim_size(0);
+			const auto    out_size = data_nr+ std::max<int>(0,padding[0])+std::max<int>(0,padding[1]);
+
+			OP_REQUIRES(context, _data.dims()<=1, errors::InvalidArgument("tensor data must be 1-dimensional"));
+			OP_REQUIRES(context, _padding.dims()<=1, errors::InvalidArgument("padding data must be 1-dimensional"));
+
+			TensorShape output_shape0({out_size});
+			Tensor* output_data = NULL;
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, output_shape0, &output_data));
+
+			auto      oq_tensor = output_data->template flat<T>().data();
+
+			/*
+			 * 如果原始数据中没有内容，使用0填充
+			 */
+			if(data_nr == 0) {
+				for(auto i=0; i<out_size; ++i) {
+					oq_tensor[i] = 0.0f;
+				}
+				return;
+			} 
+			/*
+			 * 原始数据中有内容，对称填充
+			 */
+
+            for(auto i=0; i<padding[0]; ++i) {
+                oq_tensor[i] = data[(padding[0]-i-1)%data_nr];
+            }
+            auto base_index = std::max<int>(0,padding[0]);
+            for(auto i=0; i<data_nr; ++i) {
+                oq_tensor[i+base_index] = data[i];
+            }
+            base_index = std::max<int>(0,padding[0])+data_nr;
+            auto src_index = data_nr-1;
+            for(auto i=0; i<padding[1]; ++i,--src_index) {
+                if(src_index<0)
+                    src_index = data_nr-1;
+                oq_tensor[i+base_index] = data[src_index];
+            }
+		}
+};
+REGISTER_KERNEL_BUILDER(Name("WPad").Device(DEVICE_CPU).TypeConstraint<int32_t>("T"), WPadOp<CPUDevice, int32_t>);
+REGISTER_KERNEL_BUILDER(Name("WPad").Device(DEVICE_CPU).TypeConstraint<float>("T"), WPadOp<CPUDevice, float>);
+
+/*
+ * 设置多个子tensor的值
+ * 输入tensor [X,Y,Z,...,M,N,..]tensor
+ * 输入v[M,N,...] tensor
+ * 输入index[num]，依次表示[X,Y,Z,...]维度的值
+ * 将tensor中由index指定的值设置为
+ * example:
+ * tensor shape=[2,3,4,2,2]
+ * v shape=[2,2]
+ * index=[[0,1,3]]
+ * 那么tensor[0,1,3]=v
+ */
+REGISTER_OP("SetValue")
+    .Attr("T: {int32,int64,float32,float64,bool}")
+    .Input("tensor: T")
+    .Input("v: T")
+    .Input("index: int32")
+	.Output("data:T")
+    .SetShapeFn(shape_inference::UnchangedShape);
+
+template <typename Device, typename T>
+class SetValueOp: public OpKernel {
+	public:
+		explicit SetValueOp(OpKernelConstruction* context) : OpKernel(context) {
+		}
+		void Compute(OpKernelContext* context) override
+        {
+            const Tensor &_tensor        = context->input(0);
+            const Tensor &_v             = context->input(1);
+            const Tensor &_index         = context->input(2);
+            auto          tensor         = _tensor.template flat<T>().data();
+            auto          v              = _v.template flat<T>().data();
+            auto          indexs         = _index.template tensor<int,2>();
+            auto          dim_nr         = _tensor.dims();
+            auto          skip_dim_nr    = _index.dim_size(1);
+            const auto    block_size     = _v.NumElements();
+
+            OP_REQUIRES(context, _index.dims()==2, errors::InvalidArgument("index must be 2-dimensional"));
+
+            Tensor* output_data = NULL;
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, _tensor.shape(), &output_data));
+
+            auto      oq_tensor = output_data->template flat<T>().data();
+            copy(tensor,tensor+_tensor.NumElements(),oq_tensor);
+
+            /*
+             * 如果原始数据中没有内容，使用0填充
+             */
+            const auto nr = _index.dim_size(0);
+
+            for(auto i=0; i<nr; ++i) {
+                auto offset         = 0;
+                auto cur_block_size = block_size;
+
+                for(auto j=skip_dim_nr-1; j>=0; --j) {
+                    offset += indexs(i,j)*cur_block_size;
+                    cur_block_size *= _tensor.dim_size(j);
+                }
+                copy(v,v+block_size,oq_tensor+offset);
+            }
+        }
+};
+REGISTER_KERNEL_BUILDER(Name("SetValue").Device(DEVICE_CPU).TypeConstraint<int32_t>("T"), SetValueOp<CPUDevice, int32_t>);
+REGISTER_KERNEL_BUILDER(Name("SetValue").Device(DEVICE_CPU).TypeConstraint<float>("T"), SetValueOp<CPUDevice, float>);
+REGISTER_KERNEL_BUILDER(Name("SetValue").Device(DEVICE_CPU).TypeConstraint<double>("T"), SetValueOp<CPUDevice, double>);
+REGISTER_KERNEL_BUILDER(Name("SetValue").Device(DEVICE_CPU).TypeConstraint<bool>("T"), SetValueOp<CPUDevice, bool>);
+REGISTER_KERNEL_BUILDER(Name("SetValue").Device(DEVICE_CPU).TypeConstraint<tensorflow::int64>("T"), SetValueOp<CPUDevice, tensorflow::int64>);
+/*
+ * 实现类似于numpy tensor[index[0][0]:index[0][1],index[1][0]:index[1][1],..] = v的功能
+ * 输入tensor [X,Y,Z,]tensor
+ * 输入 v，值
+ * 输入index [Nr,2] 分别表示tensor X,Y,Z...维度的起始及终止范围tensor
+ * example:
+ * tensor shape=[2,3,4,2,2]
+ * v =[0,9]
+ * index=[[1,3]]
+ * 那么tensor = [2,0,9,2,2]
+ */
+REGISTER_OP("ItemAssign")
+    .Attr("T: {int32,int64,float32,float64,bool,uint8,int8}")
+    .Input("tensor: T")
+    .Input("v: T")
+    .Input("index: int32")
+	.Output("data:T")
+    .SetShapeFn([](shape_inference::InferenceContext* c){
+        c->set_output(0,c->input(0));
+		return Status::OK();
+    });
+
+template <typename Device, typename T>
+class ItemAssignOp: public OpKernel {
+	public:
+		explicit ItemAssignOp(OpKernelConstruction* context) : OpKernel(context) {
+		}
+		void Compute(OpKernelContext* context) override
+        {
+            const Tensor &_tensor     = context->input(0);
+            const Tensor &_v          = context->input(1);
+            const Tensor &_index      = context->input(2);
+            auto          tensor_flat = _tensor.template flat<T>().data();
+            auto          indexs      = _index.template tensor<int,2>();
+            auto          dim_nr      = _tensor.dims();
+            auto          index_nr    = _index.dim_size(0);
+
+            OP_REQUIRES(context, _index.dims()==2, errors::InvalidArgument("index must be 2-dimensional"));
+            OP_REQUIRES(context, index_nr==dim_nr, errors::InvalidArgument("index size must equal tensor's dim size"));
+
+            Tensor* output_data = NULL;
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, _tensor.shape(), &output_data));
+
+            auto      oq_tensor = output_data->template flat<T>().data();
+
+            copy(tensor_flat,tensor_flat+_tensor.NumElements(),oq_tensor);
+
+            for(auto i=0; i<index_nr; ++i) {
+                if(indexs(i,0)==indexs(i,1))
+                    return;
+                if((indexs(i,0)>indexs(i,1))
+                    || (indexs(i,0)<0)
+                    || (indexs(i,1)>_tensor.dim_size(i))) {
+                    cout<<"Error index value ("<<indexs(i,0)<<","<<indexs(i,1)<<"), tensor dim size: "<<_tensor.dim_size(i)<<endl;
+                    return;
+                }
+            }
+
+            if(1 == dim_nr) {
+                auto tensor = output_data->template tensor<T,1>();
+                auto v      = _v.template tensor<T,1>();
+                Eigen::array<long,1> offset={indexs(0,0)};
+                Eigen::array<long,1> extents={indexs(0,1)-indexs(0,0)};
+
+                tensor.slice(offset,extents) = v;
+            } else if(2 == dim_nr) {
+                auto tensor = output_data->template tensor<T,2>();
+                auto v      = _v.template tensor<T,2>();
+                Eigen::array<long,2> offset={indexs(0,0),indexs(1,0)};
+                Eigen::array<long,2> extents={indexs(0,1)-indexs(0,0),indexs(1,1)-indexs(1,0)};
+
+                tensor.slice(offset,extents) = v;
+            } else if(3 == dim_nr) {
+                auto tensor = output_data->template tensor<T,3>();
+                auto v      = _v.template tensor<T,3>();
+                Eigen::array<long,3> offset={indexs(0,0),indexs(1,0),indexs(2,0)};
+                Eigen::array<long,3> extents={indexs(0,1)-indexs(0,0),indexs(1,1)-indexs(1,0),indexs(2,1)-indexs(2,0)};
+
+                tensor.slice(offset,extents) = v;
+            } else if(4 == dim_nr) {
+                auto tensor = output_data->template tensor<T,4>();
+                auto v      = _v.template tensor<T,4>();
+                Eigen::array<long,4> offset={indexs(0,0),indexs(1,0),indexs(2,0),indexs(3,0)};
+                Eigen::array<long,4> extents={indexs(0,1)-indexs(0,0),indexs(1,1)-indexs(1,0),indexs(2,1)-indexs(2,0),indexs(3,1)-indexs(3,0)};
+
+                tensor.slice(offset,extents) = v;
+            } else {
+                cout<<"Error unimplement for dim_nr = "<<dim_nr<<endl;
+            }
+        }
+};
+REGISTER_KERNEL_BUILDER(Name("ItemAssign").Device(DEVICE_CPU).TypeConstraint<int32_t>("T"), ItemAssignOp<CPUDevice, int32_t>);
+REGISTER_KERNEL_BUILDER(Name("ItemAssign").Device(DEVICE_CPU).TypeConstraint<float>("T"), ItemAssignOp<CPUDevice, float>);
+REGISTER_KERNEL_BUILDER(Name("ItemAssign").Device(DEVICE_CPU).TypeConstraint<double>("T"), ItemAssignOp<CPUDevice, double>);
+REGISTER_KERNEL_BUILDER(Name("ItemAssign").Device(DEVICE_CPU).TypeConstraint<bool>("T"), ItemAssignOp<CPUDevice, bool>);
+REGISTER_KERNEL_BUILDER(Name("ItemAssign").Device(DEVICE_CPU).TypeConstraint<tensorflow::int64>("T"), ItemAssignOp<CPUDevice, tensorflow::int64>);
+REGISTER_KERNEL_BUILDER(Name("ItemAssign").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), ItemAssignOp<CPUDevice, uint8_t>);
+REGISTER_KERNEL_BUILDER(Name("ItemAssign").Device(DEVICE_CPU).TypeConstraint<int8_t>("T"), ItemAssignOp<CPUDevice, int8_t>);

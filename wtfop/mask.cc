@@ -469,3 +469,425 @@ class GetBboxesFromMaskOp: public OpKernel {
 };
 REGISTER_KERNEL_BUILDER(Name("GetBboxesFromMask").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), GetBboxesFromMaskOp<CPUDevice, uint8_t>);
 REGISTER_KERNEL_BUILDER(Name("GetBboxesFromMask").Device(DEVICE_CPU).TypeConstraint<float>("T"), GetBboxesFromMaskOp<CPUDevice, float>);
+/*
+ * 输入mask[H,W,N]
+ * 输入labels[N]
+ * set_background:如果一个位置没有标签，则默认为背景
+ * attr:num_classes
+ * 输出mask[W,H,num_classes]
+ */
+REGISTER_OP("SparseMaskToDense")
+    .Attr("T: {int32,bool,int8,uint8}")
+	.Attr("num_classes:int")
+	.Attr("set_background:bool")
+    .Input("mask: T")
+    .Input("labels: int32")
+	.Output("data:T")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+			int num_classes = 0;
+			c->GetAttr("num_classes",&num_classes);
+			auto w = c->Value(c->Dim(c->input(0),0));
+			auto h = c->Value(c->Dim(c->input(0),1));
+            auto output_shape = c->MakeShape({h, w, num_classes});
+			c->set_output(0,output_shape);
+			return Status::OK();
+			});
+
+template <typename Device, typename T>
+class SparseMaskToDenseOp: public OpKernel {
+	public:
+		explicit SparseMaskToDenseOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context,
+					context->GetAttr("num_classes", &num_classes_));
+			OP_REQUIRES_OK(context,
+					context->GetAttr("set_background", &set_background_));
+		}
+		void Compute(OpKernelContext* context) override
+        {
+            const Tensor &_mask   = context->input(0);
+            const Tensor &_labels = context->input(1);
+            auto          mask    = _mask.template tensor<T,3>();
+            auto          labels  = _labels.template flat<int>().data();
+            auto          h       = _mask.dim_size(0);
+            auto          w       = _mask.dim_size(1);
+            auto          nr      = _mask.dim_size(2);
+            auto          nr1     = _labels.dim_size(0);
+
+            OP_REQUIRES(context, _labels.dims()==1, errors::InvalidArgument("labels must be 1-dimensional"));
+            OP_REQUIRES(context, _mask.dims()==3, errors::InvalidArgument("mask must be 3-dimensional"));
+            OP_REQUIRES(context, nr==nr1, errors::InvalidArgument("size unmatch."));
+
+            int          dims3d[]     = {int(h),int(w),num_classes_};
+            Tensor      *output_data  = NULL;
+            TensorShape  output_shape;
+
+            TensorShapeUtils::MakeShape(dims3d, 3, &output_shape);
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_data));
+
+            auto      oq_tensor = output_data->template tensor<T,3>();
+            oq_tensor.setZero();
+			using tensor_t = Eigen::Tensor<T,2,Eigen::RowMajor>;
+
+            for(auto i=0; i<nr; ++i) {
+				const auto label = labels[i];
+				if((label<0) || (label>=num_classes_)) {
+					cout<<"Error label "<<label<<", not in range [0,"<<num_classes_<<")"<<endl;
+					continue;
+				}
+                auto t = oq_tensor.chip(label,2);
+                t = (t||mask.chip(i,2)).template cast<T>();
+            }
+
+			if(!set_background_) return;
+
+			for(auto i=0; i<h; ++i) {
+				for(auto j=0; j<w; ++j) {
+					bool have_label = false;
+					for(auto k=0; k<nr; ++k) {
+						const auto label = labels[k];
+
+						if((label<0) || (label>=num_classes_)) continue;
+
+						if(mask(i,j,k) != 0) {
+							have_label = true;
+							break;
+						}
+					}
+					if(have_label) continue;
+
+					oq_tensor(i,j,0) = T(true);
+				}
+			}
+        }
+	private:
+		int num_classes_ = 0;
+		bool set_background_ = false;
+};
+REGISTER_KERNEL_BUILDER(Name("SparseMaskToDense").Device(DEVICE_CPU).TypeConstraint<int32_t>("T"), SparseMaskToDenseOp<CPUDevice, int32_t>);
+REGISTER_KERNEL_BUILDER(Name("SparseMaskToDense").Device(DEVICE_CPU).TypeConstraint<bool>("T"), SparseMaskToDenseOp<CPUDevice, bool>);
+REGISTER_KERNEL_BUILDER(Name("SparseMaskToDense").Device(DEVICE_CPU).TypeConstraint<int8_t>("T"), SparseMaskToDenseOp<CPUDevice, int8_t>);
+REGISTER_KERNEL_BUILDER(Name("SparseMaskToDense").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), SparseMaskToDenseOp<CPUDevice, uint8_t>);
+
+/*
+ * mask_size: 输出的mask像素大小
+ * masks:[Nr,h,w]
+ * test_threshold: 距离小于test_threshold的bbox才进行是否可以合并的检测
+ * kerner_size: 闭运算kernel大小
+ * bboxes:[Nr,4] absolute coordinate
+ * labels:[Nr]
+ * mask:[Nr,H,W]
+ * output:
+ * out_bboxes: [out_Nr,4]
+ * out_labels: [out_Nr]
+ * out_masks: [out_Nr,mask_size,mask_size]
+ * out_indices: [Nr] 相同的值表示相应位置的输入合并在了一起
+ */
+REGISTER_OP("MergeInstanceByMask")
+    .Attr("T: {float32,uint8}")
+    .Attr("mask_size:int=63")
+    .Attr("test_threshold:int=8")
+    .Attr("kernel_size:int=3")
+    .Input("bboxes: T")
+    .Input("labels: int32")
+    .Input("probability: T")
+    .Input("mask: uint8")
+	.Output("out_bboxes:T")
+	.Output("out_labels:int32")
+	.Output("out_probability:T")
+	.Output("out_masks:uint8")
+	.Output("out_indices:int32")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+            int mask_size = 0;
+            c->GetAttr("mask_size",&mask_size);
+            const auto nr = c->Value(c->Dim(c->input(0),0));
+            const auto shape0     = c->MakeShape({-1,4});
+            const auto shape1     = c->MakeShape({-1});
+            const auto shape2     = c->MakeShape({nr});
+            const auto shape3     = c->MakeShape({-1,mask_size,mask_size});
+			c->set_output(0, shape0);
+			c->set_output(1, shape1);
+			c->set_output(2, shape1);
+			c->set_output(3, shape3);
+			c->set_output(4, shape2);
+			return Status::OK();
+			});
+
+template <typename Device,typename T>
+class MergeInstanceByMaskOp: public OpKernel {
+    private:
+        using bbox_t = Eigen::Tensor<T,1,Eigen::RowMajor>;
+        using mask_t = Eigen::Tensor<uint8_t,2,Eigen::RowMajor>;
+    public:
+        explicit MergeInstanceByMaskOp(OpKernelConstruction* context) : OpKernel(context) {
+            OP_REQUIRES_OK(context, context->GetAttr("mask_size", &mask_size_));
+            OP_REQUIRES_OK(context, context->GetAttr("test_threshold", &test_threshold_));
+            OP_REQUIRES_OK(context, context->GetAttr("kernel_size", &kerner_size_));
+        }
+
+        void Compute(OpKernelContext* context) override
+        {
+            const Tensor &_bboxes = context->input(0);
+            const Tensor &_labels= context->input(1);
+            const Tensor &_probability = context->input(2);
+            const Tensor &_mask= context->input(3);
+
+            OP_REQUIRES(context, _mask.dims() == 3, errors::InvalidArgument("mask data must be 3-dimensional"));
+            OP_REQUIRES(context, _bboxes.dims() == 2, errors::InvalidArgument("bboxes data must be 2-dimensional"));
+            OP_REQUIRES(context, _labels.dims() == 1, errors::InvalidArgument("labels data must be 1-dimensional"));
+            OP_REQUIRES(context, _probability.dims() == 1, errors::InvalidArgument("probability data must be 1-dimensional"));
+
+            auto       mask        = _mask.template tensor<uint8_t,3>();
+            auto       bboxes      = _bboxes.template tensor<T,2>();
+            auto       labels      = _labels.template tensor<int,1>();
+            auto       probability = _probability.template tensor<T,1>();
+            const auto data_nr     = _mask.dim_size(0);
+
+            bool is_merged = false;
+            vector<bbox_t> in_bboxes_data;
+            vector<int> in_labels_data;
+            vector<mask_t> in_mask_data;
+            vector<int> in_indices_data;
+            vector<T> in_probability;
+            vector<bool> need_remove(data_nr,false);
+
+            for(auto i=0; i<data_nr; ++i) {
+                in_bboxes_data.push_back(bboxes.chip(i,0));
+                in_labels_data.push_back(labels(i));
+                in_mask_data.push_back(mask.chip(i,0));
+                in_indices_data.push_back(i);
+                in_probability.push_back(probability(i));
+            }
+
+            do {
+                is_merged = false;
+                for(auto i=0; i<in_bboxes_data.size()-1; ++i) {
+                    if(need_remove[i])
+                        continue;
+                    auto& bbox0 = in_bboxes_data[i];
+                    for(auto j=i+1; j<in_bboxes_data.size(); ++j) {
+                        if(need_remove[j])
+                            continue;
+                        if(in_labels_data[i] != in_labels_data[j]) 
+                            continue;
+                        if(in_labels_data[i] != 2) 
+                            continue;
+
+                        auto &bbox1 = in_bboxes_data[j];
+                        auto  dis   = bboxes_distance(in_bboxes_data[i],in_bboxes_data[j]);
+
+                        cout<<"dis:"<<dis<<endl;
+                        if(dis > test_threshold_)
+                            continue;
+                        cout<<"try merge."<<endl;
+
+                        try {
+                            auto res = merge_bboxes({bbox0,bbox1},{in_mask_data[i],in_mask_data[j]});
+
+                            in_mask_data[i] = get<1>(res);
+                            in_bboxes_data[i] = get<0>(res);
+                            in_indices_data[j] = in_indices_data[i];
+                            in_probability[i] = max(in_probability[i],in_probability[j]);
+                            need_remove[j] = true;
+                            is_merged = true;
+                        }catch(...) {
+                        }
+                    }
+                }
+            }while(is_merged);
+
+            auto         total_nr           = count(need_remove.begin(),need_remove.end(),false);
+            int          dims_1d[1]         = {total_nr};
+            int          dims_2d[2]         = {total_nr,4};
+            int          dims_1d2[1]        = {data_nr};
+            int          dims_3d[3]         = {total_nr,mask_size_,mask_size_};
+            TensorShape  outshape0;
+            TensorShape  outshape1;
+            TensorShape  outshape2;
+            TensorShape  outshape3;
+            Tensor      *output_bboxes      = NULL;
+            Tensor      *output_labels      = NULL;
+            Tensor      *output_probability = NULL;
+            Tensor      *output_mask        = NULL;
+            Tensor      *output_indices     = NULL;
+
+            TensorShapeUtils::MakeShape(dims_1d, 1, &outshape0);
+            TensorShapeUtils::MakeShape(dims_2d, 2, &outshape1);
+            TensorShapeUtils::MakeShape(dims_1d2, 1, &outshape2);
+            TensorShapeUtils::MakeShape(dims_3d, 3, &outshape3);
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, outshape1, &output_bboxes));
+            OP_REQUIRES_OK(context, context->allocate_output(1, outshape0, &output_labels));
+            OP_REQUIRES_OK(context, context->allocate_output(2, outshape0, &output_probability));
+            OP_REQUIRES_OK(context, context->allocate_output(3, outshape3, &output_mask));
+            OP_REQUIRES_OK(context, context->allocate_output(4, outshape2, &output_indices));
+
+            auto o_mask        = output_mask->template tensor<uint8_t,3>();
+            auto o_bboxes      = output_bboxes->template tensor<T,2>();
+            auto o_labels      = output_labels->template tensor<int,1>();
+            auto o_probability = output_probability->template tensor<T,1>();
+            auto o_indices     = output_indices->template tensor<int,1>();
+
+            cout<<"Total merged: "<<data_nr-total_nr<<endl;
+            for(auto i=0,j=0; i<data_nr; ++i) {
+                o_indices(i) = in_indices_data[i];
+                if(need_remove[i])
+                    continue;
+                o_bboxes.chip(j,0) = in_bboxes_data[i];
+                o_labels(j) = in_labels_data[i];
+                o_probability(j) = in_probability[i];
+                if(in_mask_data[i].dimension(0) == mask_size_) {
+                    o_mask.chip(j,0) = in_mask_data[i];
+                } else {
+                    o_mask.chip(j,0) = resize_mask(in_mask_data[i],mask_size_);
+                }
+                ++j;
+            }
+        }
+        mask_t resize_mask(const mask_t& msk,size_t size) {
+            const cv::Mat input_mask(msk.dimension(0),msk.dimension(1),CV_8UC1,(void*)(msk.data()));
+            cv::Mat dst_mask(size,size,CV_8UC1);
+            mask_t res_mask(size,size);
+
+            cv::resize(input_mask,dst_mask,cv::Size(size,size),0,0,CV_INTER_LINEAR);
+            memcpy(res_mask.data(),dst_mask.data,size*size);
+
+            return res_mask;
+        }
+        static vector<bbox_t> make_around_bboxes(const bbox_t& box0,const bbox_t& box1) {
+
+            bbox_t res_box0(4);
+            bbox_t res_box1(4);
+            bbox_t res_box2(4);
+            bbox_t res_box3(4);
+            res_box0(0) = box0(0)-(box1(2)-box1(0));
+            res_box0(1) = box0(1);
+            res_box0(2) = box0(0);
+            res_box0(3) = box0(3);
+
+            res_box1(0) = box0(0);
+            res_box1(1) = box0(3);
+            res_box1(2) = box0(2);
+            res_box1(3) = box0(3)+(box1(3)-box1(1));
+
+            res_box2(0) = box0(2);
+            res_box2(1) = box0(1);
+            res_box2(2) = box0(2)+(box1(2)-box1(0));;
+            res_box2(3) = box0(3);
+
+            res_box1(0) = box0(0)-(box1(3)-box1(1));;
+            res_box1(1) = box0(3);
+            res_box1(2) = box0(2);
+            res_box1(3) = box0(0);
+            return {box0,res_box0,res_box1,res_box2,res_box3};
+            
+        }
+        float bboxes_distance(const bbox_t& box0,const bbox_t& box1) {
+            auto  bboxes  = make_around_bboxes(box0,box1);
+            int   index   = -1;
+            float max_iou = -1.0;
+
+            cout<<"-----------------------"<<endl;
+            for(auto i=0; i<bboxes.size(); ++i) {
+                auto v0 = bboxes_jaccard_of_box0v1(bboxes[i],box1);
+                auto v1 = bboxes_jaccard_of_box0v1(box1,bboxes[i]);
+                auto v = max(v0,v1);
+
+                if(v>max_iou) {
+                    max_iou = v;
+                    index = i;
+                }
+                cout<<v<<",";
+            }
+            cout<<endl;
+            cout<<"max_iou:"<<max_iou<<endl;
+            if(max_iou<0.4)
+                return 1e8;
+            switch(index) {
+                case 0:
+                    return 0;
+                case 1:
+                    return fabs(box1(2)-box0(0));
+                case 2:
+                    return fabs(box1(1)-box0(3));
+                case 3:
+                    return fabs(box1(0)-box0(2));
+                case 4:
+                    return fabs(box1(3)-box0(1));
+                default:
+                    cout<<"Error type."<<endl;
+                    return 1e8;
+            }
+        }
+        static cv::Mat to_mat(const mask_t& msk) 
+        {
+            cv::Mat res(msk.dimension(0),msk.dimension(1),CV_8UC1,(void*)msk.data());
+            return res.clone();
+        }
+        tuple<bbox_t,mask_t> merge_bboxes(const vector<bbox_t>& boxes,const vector<mask_t>& masks) noexcept(false)
+        {
+            bbox_t  env_bbox(4);
+            cv::Mat res_mask = cv::Mat::zeros(mask_size_,mask_size_,CV_8UC1);
+            cv::Mat res_mask1 = cv::Mat::zeros(mask_size_,mask_size_,CV_8UC1);
+            int total_nr = 0;
+
+            bboxes_envelope(boxes[0],boxes[1],env_bbox);
+
+            const auto env_bbox_w = env_bbox(3)-env_bbox(1);
+            const auto env_bbox_h = env_bbox(2)-env_bbox(0);
+
+            for(auto i=0; i<boxes.size(); ++i) {
+                vector<vector<cv::Point>> contours;
+                vector<vector<cv::Point>> new_contours;
+                vector<cv::Vec4i> hierarchy;
+                vector<cv::Point> points;
+                cv::Mat dst_img = to_mat(masks[i]);
+                const auto cur_bbox = boxes[i];
+                const auto cur_mask_h = masks[i].dimension(0);
+                const auto cur_mask_w = masks[i].dimension(1);
+                const auto cur_bbox_w = cur_bbox(3)-cur_bbox(1);
+                const auto cur_bbox_h = cur_bbox(2)-cur_bbox(0);
+
+                cv::findContours(dst_img, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE, cv::Point(0,0));
+
+                if(contours.size()==0) {
+                    cout<<"Error contours size."<<endl;
+                    throw std::runtime_error("error contours size.");
+                }
+
+                for(auto& points:contours) {
+                    vector<cv::Point> new_points;
+                    for(auto& p:points) {
+                        auto x = (p.x*cur_bbox_w/cur_mask_w+cur_bbox(1)-env_bbox(1))*mask_size_/env_bbox_w;
+                        auto y = (p.y*cur_bbox_h/cur_mask_h+cur_bbox(0)-env_bbox(0))*mask_size_/env_bbox_h;
+                        new_points.push_back(cv::Point(x,y));
+                    }
+                    new_contours.push_back(new_points);
+                }
+                cv::drawContours(res_mask,new_contours,-1,cv::Scalar(1),CV_FILLED,8,hierarchy);
+
+                total_nr += contours.size();
+            }
+
+            vector<vector<cv::Point>> contours;
+            vector<vector<cv::Point>> new_contours;
+            vector<cv::Vec4i> hierarchy;
+            cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(kerner_size_, kerner_size_), cv::Point(-1, -1));
+
+            cv::morphologyEx(res_mask, res_mask1, CV_MOP_CLOSE, kernel);
+            cv::findContours(res_mask1.clone(), contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE, cv::Point(0,0));
+
+            if((contours.size()==1)
+                    || (contours.size()<total_nr-2)) {
+                mask_t r_mask(mask_size_,mask_size_);
+                memcpy(r_mask.data(),res_mask1.data,mask_size_*mask_size_);
+                return make_tuple(env_bbox,r_mask);
+            }
+            throw std::runtime_error("merge faild.");
+        }
+    private:
+        int mask_size_      = 63;
+        int test_threshold_ = 8;
+        int kerner_size_    = 3;
+};
+REGISTER_KERNEL_BUILDER(Name("MergeInstanceByMask").Device(DEVICE_CPU).TypeConstraint<float>("T"), MergeInstanceByMaskOp<CPUDevice,float>);
