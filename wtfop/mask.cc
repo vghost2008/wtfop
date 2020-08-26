@@ -670,8 +670,6 @@ class MergeInstanceByMaskOp: public OpKernel {
                             continue;
                         if(in_labels_data[i] != in_labels_data[j]) 
                             continue;
-                        if(in_labels_data[i] != 2) 
-                            continue;
 
                         auto &bbox1 = in_bboxes_data[j];
                         auto  dis   = bboxes_distance(in_bboxes_data[i],in_bboxes_data[j]);
@@ -760,6 +758,7 @@ class MergeInstanceByMaskOp: public OpKernel {
             bbox_t res_box1(4);
             bbox_t res_box2(4);
             bbox_t res_box3(4);
+
             res_box0(0) = box0(0)-(box1(2)-box1(0));
             res_box0(1) = box0(1);
             res_box0(2) = box0(0);
@@ -775,10 +774,10 @@ class MergeInstanceByMaskOp: public OpKernel {
             res_box2(2) = box0(2)+(box1(2)-box1(0));;
             res_box2(3) = box0(3);
 
-            res_box1(0) = box0(0)-(box1(3)-box1(1));;
-            res_box1(1) = box0(3);
-            res_box1(2) = box0(2);
-            res_box1(3) = box0(0);
+            res_box3(0) = box0(0);
+            res_box3(1) = box0(1)-(box1(3)-box1(1));
+            res_box3(2) = box0(2);
+            res_box3(3) = box0(1);
             return {box0,res_box0,res_box1,res_box2,res_box3};
             
         }
@@ -801,6 +800,8 @@ class MergeInstanceByMaskOp: public OpKernel {
             }
             cout<<endl;
             cout<<"max_iou:"<<max_iou<<endl;
+            show_box(box0);
+            show_box(box1);
             if(max_iou<0.4)
                 return 1e8;
             switch(index) {
@@ -818,6 +819,9 @@ class MergeInstanceByMaskOp: public OpKernel {
                     cout<<"Error type."<<endl;
                     return 1e8;
             }
+        }
+        void show_box(const bbox_t& box) {
+            cout<<box(0)<<","<<box(1)<<","<<box(2)<<","<<box(3)<<endl;
         }
         static cv::Mat to_mat(const mask_t& msk) 
         {

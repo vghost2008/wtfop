@@ -231,9 +231,10 @@ class QcPostProcessOp: public OpKernel {
             if(infos.empty()) 
                 return;
 
+            cout<<"---------------------------------------------------------"<<endl;
+
             for(auto i=0; i<infos.size()-1; ++i) {
                 auto info0 = infos[i];
-                const auto angle = info0.angle;
 
                 if(info0.statu.test(KMIS_NEED_MERGE))
                     continue;
@@ -241,12 +242,16 @@ class QcPostProcessOp: public OpKernel {
                 indexs.clear();
                 indexs.push_back(i);
                 for(auto j=i+1; j<infos.size(); ++j) {
+                    KnifeMaskInfo ref_info = infos[indexs.back()];
                     const auto info1 = infos[j];
+                    const auto angle = ref_info.angle;
+                    cout<<ref_info.center_x<<","<<ref_info.center_y<<","<<ref_info.angle<<":"<<info1.center_x<<","<<info1.center_y<<","<<info1.angle<<endl;
                     if(fabs(info1.angle-angle)>angle_threshold_)
                         continue;
-                     auto delta_x = info1.center_x-info0.center_x;
-                     auto delta_y = info1.center_y-info0.center_y;
+                     auto delta_x = info1.center_x-ref_info.center_x;
+                     auto delta_y = info1.center_y-ref_info.center_y;
                      auto pos_angle = atan2(delta_y,delta_x)*180/M_PI;
+                     cout<<"pos_angle:"<<pos_angle<<endl;
                      if(pos_angle<=-90) {
                          pos_angle = 180.0+pos_angle;
                      } else if(pos_angle>90) {
