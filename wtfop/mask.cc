@@ -369,7 +369,7 @@ REGISTER_KERNEL_BUILDER(Name("MaskRotate").Device(DEVICE_CPU).TypeConstraint<uin
 REGISTER_KERNEL_BUILDER(Name("MaskRotate").Device(DEVICE_CPU).TypeConstraint<float>("T"), MaskRotateOp<CPUDevice, float>);
 
 /*
- * 对mask [Nr,H,W] 旋转指定角度，同时返回相应instance的bbox
+ * mask [Nr,H,W] 中查找目标instance的bbox
  * bbox [N,4],[ymin,xmin,ymax,xmax], 绝对坐标
  */
 REGISTER_OP("GetBboxesFromMask")
@@ -674,10 +674,8 @@ class MergeInstanceByMaskOp: public OpKernel {
                         auto &bbox1 = in_bboxes_data[j];
                         auto  dis   = bboxes_distance(in_bboxes_data[i],in_bboxes_data[j]);
 
-                        cout<<"dis:"<<dis<<endl;
                         if(dis > test_threshold_)
                             continue;
-                        cout<<"try merge."<<endl;
 
                         try {
                             auto res = merge_bboxes({bbox0,bbox1},{in_mask_data[i],in_mask_data[j]});
@@ -726,7 +724,6 @@ class MergeInstanceByMaskOp: public OpKernel {
             auto o_probability = output_probability->template tensor<T,1>();
             auto o_indices     = output_indices->template tensor<int,1>();
 
-            cout<<"Total merged: "<<data_nr-total_nr<<endl;
             for(auto i=0,j=0; i<data_nr; ++i) {
                 o_indices(i) = in_indices_data[i];
                 if(need_remove[i])
@@ -786,7 +783,6 @@ class MergeInstanceByMaskOp: public OpKernel {
             int   index   = -1;
             float max_iou = -1.0;
 
-            cout<<"-----------------------"<<endl;
             for(auto i=0; i<bboxes.size(); ++i) {
                 auto v0 = bboxes_jaccard_of_box0v1(bboxes[i],box1);
                 auto v1 = bboxes_jaccard_of_box0v1(box1,bboxes[i]);
@@ -796,12 +792,7 @@ class MergeInstanceByMaskOp: public OpKernel {
                     max_iou = v;
                     index = i;
                 }
-                cout<<v<<",";
             }
-            cout<<endl;
-            cout<<"max_iou:"<<max_iou<<endl;
-            show_box(box0);
-            show_box(box1);
             if(max_iou<0.4)
                 return 1e8;
             switch(index) {

@@ -34,6 +34,7 @@ print(lib_path)
 wtfop_module = tf.load_op_library(lib_path)
 random_select = wtfop_module.random_select
 min_area_rect = wtfop_module.min_area_rect
+min_area_rect_with_bboxes  = wtfop_module.min_area_rect_with_bboxes 
 full_size_mask = wtfop_module.full_size_mask
 tensor_rotate = wtfop_module.tensor_rotate
 left_pool = wtfop_module.left_pool

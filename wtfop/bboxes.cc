@@ -15,6 +15,7 @@
 #include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/util/work_sharder.h"
 #include "bboxes.h"
+#include "bboxes_encode.h"
 #include "wtoolkit.h"
 
 using namespace tensorflow;
@@ -787,17 +788,18 @@ class BoxesMatchWithPredOp: public OpKernel {
 			const Tensor &_gboxes  = context->input(2);
 			const Tensor &_glabels = context->input(3);
 			const Tensor &_glens   = context->input(4);
-			auto          boxes    = _boxes.tensor<T,3>();
-			auto          plabels  = _plabels.tensor<int,2>();
-			auto          gboxes   = _gboxes.tensor<T,3>();
-			auto          glabels  = _glabels.tensor<int,2>();
-			auto          glens    = _glens.tensor<int,1>();
 
 			OP_REQUIRES(context, _boxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
 			OP_REQUIRES(context, _gboxes.dims() == 3, errors::InvalidArgument("gboxes data must be 3-dimensional"));
 			OP_REQUIRES(context, _glabels.dims() == 2, errors::InvalidArgument("glabels data must be 2-dimensional"));
 			OP_REQUIRES(context, _plabels.dims() == 2, errors::InvalidArgument("plabels data must be 2-dimensional"));
 			OP_REQUIRES(context, _glens.dims() == 1, errors::InvalidArgument("glens data must be 1-dimensional"));
+
+			auto          boxes    = _boxes.tensor<T,3>();
+			auto          plabels  = _plabels.tensor<int,2>();
+			auto          gboxes   = _gboxes.tensor<T,3>();
+			auto          glabels  = _glabels.tensor<int,2>();
+			auto          glens    = _glens.tensor<int,1>();
 
 			const int batch_nr  = _boxes.dim_size(0);
 			const int boxes_nr  = _boxes.dim_size(1);

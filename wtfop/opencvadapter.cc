@@ -24,6 +24,24 @@
 using namespace tensorflow;
 using namespace std;
 namespace bm=boost::mpl;
+cv::RotatedRect getRotatedRect(const cv::Mat& img)
+{
+    vector<vector<cv::Point>> contours;
+    vector<cv::Vec4i> hierarchy;
+    vector<cv::Point> points;
+
+    cv::findContours(img, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE, cv::Point(0,0));
+
+    for (auto &cont:contours) 
+        points.insert(points.end(),cont.begin(),cont.end());
+
+    return  cv::minAreaRect(points);
+}
+cv::RotatedRect getRotatedRect(const uint8_t* data,int height,int width)
+{
+    const cv::Mat img(height,width,CV_8UC1,(uint8_t*)data);
+    return getRotatedRect(img);
+}
 
 typedef Eigen::ThreadPoolDevice CPUDevice;
 
@@ -167,7 +185,7 @@ REGISTER_KERNEL_BUILDER(Name("BilateralFilter").Device(DEVICE_CPU).TypeConstrain
 REGISTER_KERNEL_BUILDER(Name("BilateralFilter").Device(DEVICE_CPU).TypeConstraint<float>("T"), BilateralFilterOp<CPUDevice, float>);
 
 /*
- * image:[N,H,W], 二值图像
+ * image:[N,H,W], 二值图像, 整图尺寸的mask
  * 当res_points==True时
  * return:
  * [N,4,2] 分别为[[[p0.x,p0.y],[p1.x,p1.y],..[p3.x,p3.y]],[....]]]
@@ -244,26 +262,134 @@ class MinAreaRectOp: public OpKernel {
                 }
             }
         }
-        cv::RotatedRect getRotatedRect(const uint8_t* data,int height,int width)
-        {
-            vector<vector<cv::Point>> contours;
-            vector<cv::Vec4i> hierarchy;
-            const cv::Mat img(height,width,CV_8UC1,(uint8_t*)data);
-            vector<cv::Point> points;
-
-            cv::findContours(img, contours, hierarchy, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE, cv::Point(0,0));
-
-            for (auto &cont:contours) 
-                points.insert(points.end(),cont.begin(),cont.end());
-
-            return  cv::minAreaRect(points);
-        }
 
 	private:
         bool res_points_ = true;
 };
 REGISTER_KERNEL_BUILDER(Name("MinAreaRect").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), MinAreaRectOp<CPUDevice, uint8_t>);
 
+/*
+ * mask:[N,H,W], 二值图像, 仅instance bboxes内部部分
+ * bboxes:[N,4]绝对坐标
+ * 当res_points==True时
+ * return:
+ * [N,4,2] 分别为[[[p0.x,p0.y],[p1.x,p1.y],..[p3.x,p3.y]],[....]]]
+ * 当res_points==False时:
+ * [N,3,2] 分别为[[[center.x,center.y],[width,height],[angle,_]],[.....]]]
+ * 旋转角度θ是水平轴（x轴）逆时针旋转，与碰到的矩形的第一条边的夹角。并且这个边的边长是width，另一条边边长是height。也就是说，在这里，width与height不是按照长短来定义的。
+ * 在opencv中，坐标系原点在左上角，相对于x轴，逆时针旋转角度为负，顺时针旋转角度为正。所以，θ∈（-90度，0]
+ */
+REGISTER_OP("MinAreaRectWithBboxes")
+    .Attr("res_points: bool = True")
+    .Attr("size_limit: list(int)= [63,1024]")
+    .Input("mask: uint8")
+    .Input("bboxes: float")
+	.Output("box:float")
+    .SetShapeFn([](shape_inference::InferenceContext* c){
+            bool res_points = true;
+            c->GetAttr("res_points",&res_points);
+            auto input_shape0 = c->input(0);
+            const auto batch_size = c->Dim(input_shape0,0);
+                auto shape = c->MakeShape({batch_size,res_points?4:3,2});
+                c->set_output(0, shape);
+			return Status::OK();
+            });
+
+template <typename Device>
+class MinAreaRectWithBboxesOp: public OpKernel {
+    private:
+        using bbox_t = Eigen::Tensor<float,1,Eigen::RowMajor>;
+        using mask_t = Eigen::Tensor<uint8_t,2,Eigen::RowMajor>;
+        using Tensor3D = Eigen::Tensor<uint8_t,3,Eigen::RowMajor>;
+        using Tensor4D = Eigen::Tensor<uint8_t,4,Eigen::RowMajor>;
+	public:
+		explicit MinAreaRectWithBboxesOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("res_points", &res_points_));
+			OP_REQUIRES_OK(context, context->GetAttr("size_limit", &size_limit_));
+		}
+        static cv::Mat to_mat(const mask_t& msk) 
+        {
+            cv::Mat res(msk.dimension(0),msk.dimension(1),CV_8UC1,(void*)msk.data());
+            return res.clone();
+        }
+		void Compute(OpKernelContext* context) override
+		{
+			const Tensor &_input_mask= context->input(0);
+			const Tensor &_input_bboxes = context->input(1);
+
+			OP_REQUIRES(context, _input_mask.dims() == 3, errors::InvalidArgument("mask must be at 3-dimensional"));
+			OP_REQUIRES(context, _input_bboxes.dims() == 2, errors::InvalidArgument("bboxes must be at 2-dimensional"));
+
+            auto         input_mask = _input_mask.template tensor<uint8_t,3>();
+            auto         input_bboxes = _input_bboxes.template tensor<float,2>();
+            const auto   batch_size    = _input_mask.dim_size(0);
+            const auto   msk_height    = _input_mask.dim_size(1);
+            const auto   msk_width     = _input_mask.dim_size(2);
+            const int    dim3d[]       = {batch_size,res_points_?4:3,2};
+            TensorShape  output_shape;
+            Tensor      *output_tensor = nullptr;
+
+            TensorShapeUtils::MakeShape(dim3d,3,&output_shape);
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_tensor));
+            auto      o_tensor = output_tensor->template tensor<float,3>();
+
+            o_tensor.setZero();
+
+            for(auto i=0; i<batch_size; ++i) {
+                try{
+                    mask_t r_mask = input_mask.chip(i,0);
+                    auto m_mask = to_mat(r_mask);
+                    bbox_t box = input_bboxes.chip(i,0);
+                    auto size = get_size(box);
+                    cv::Mat n_mask;
+
+                    cv::resize(m_mask,n_mask,cv::Size(get<1>(size),get<0>(size)),0,0,CV_INTER_LINEAR);
+
+                    auto rect = getRotatedRect(n_mask);
+                    auto scale = get<2>(size);
+
+                    if(res_points_) {
+                        cv::Point2f P[4];
+                        rect.points(P);
+                        for(auto j=0; j<4; ++j) {
+                            o_tensor(i,j,0) = P[j].x/scale+box(1);
+                            o_tensor(i,j,1) = P[j].y/scale+box(0);
+                        }
+                    } else {
+                        o_tensor(i,0,0) = rect.center.x/scale+box(1);
+                        o_tensor(i,0,1) = rect.center.y/scale+box(0);
+                        o_tensor(i,1,0) = rect.size.width/scale;
+                        o_tensor(i,1,1) = rect.size.height/scale;
+                        o_tensor(i,2,0) = rect.angle;
+                        o_tensor(i,2,1) = 0;
+                    }
+                } catch(...) {
+                }
+            }
+        }
+        auto get_size(const bbox_t& box) {
+            auto         w              = box(3)-box(1);
+            auto         h              = box(2)-box(0);
+            const double min_size_limit = size_limit_[0] *size_limit_[0];
+            const double max_size_limit = size_limit_[1] *size_limit_[1];
+            double       scale          = 1.0;
+
+            if(h*w>max_size_limit) {
+                scale = sqrt(max_size_limit/(h*w));
+            } else if(h*w<min_size_limit) {
+                scale = sqrt(min_size_limit/(h*w));
+            }
+            h = h*scale;
+            w = w*scale;
+            return make_tuple(h,w,scale);
+        }
+
+	private:
+        bool        res_points_ = true;
+        vector<int> size_limit_;
+};
+REGISTER_KERNEL_BUILDER(Name("MinAreaRectWithBboxes").Device(DEVICE_CPU), MinAreaRectWithBboxesOp<CPUDevice>);
 
 /*
  * 对输入image[H,W,C] C=1 or C=3 旋转任意角度

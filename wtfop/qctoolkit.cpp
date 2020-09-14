@@ -38,18 +38,15 @@ REGISTER_OP("QcPostProcess")
     .Input("probability: T")
     .Input("mask: uint8")
     .Input("min_area_bboxes: T")
-    .Input("mask_area: T")
 	.Output("r_bboxes:T")
 	.Output("r_labels:int32")
 	.Output("r_probability:T")
 	.Output("r_mask:uint8")
-	.Output("r_mask_area:T")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
             c->set_output(0,c->Matrix(-1,4));
 			c->set_output(1, c->Vector(-1));
 			c->set_output(2, c->Vector(-1));
 			c->set_output(3, c->input(3));
-			c->set_output(4, c->Vector(-1));
 			return Status::OK();
 			});
 
@@ -60,6 +57,7 @@ class QcPostProcessOp: public OpKernel {
         using mask_t = Eigen::Tensor<uint8_t,2,Eigen::RowMajor>;
     private:
         static constexpr auto kMinKnifeRatio = 5.0f;
+        static constexpr auto kDecayKnifeRatio = 1.0f;
         enum KMI_Status
         {
             KMIS_NEED_UPDATE_PROBABILITY,
@@ -90,7 +88,6 @@ class QcPostProcessOp: public OpKernel {
             const Tensor &_probability     = context->input(2);
             const Tensor &_mask            = context->input(3);
             const Tensor &_min_area_bboxes = context->input(4);
-            const Tensor &_mask_area       = context->input(5);
 
             OP_REQUIRES(context, _bboxes.dims() == 2, errors::InvalidArgument("bboxes data must be 2-dimensional"));
             OP_REQUIRES(context, _labels.dims() == 1, errors::InvalidArgument("labels data must be 1-dimensional"));
@@ -108,7 +105,6 @@ class QcPostProcessOp: public OpKernel {
             Tensor      *output_bboxes = nullptr;
             Tensor      *output_labels = nullptr;
             Tensor      *output_probability = nullptr;
-            Tensor      *output_mask_area   = nullptr;
             Tensor      *output_mask   = nullptr;
 
 
@@ -116,15 +112,12 @@ class QcPostProcessOp: public OpKernel {
             OP_REQUIRES_OK(context,context->allocate_output(1,_labels.shape(),&output_labels));
             OP_REQUIRES_OK(context,context->allocate_output(2,_probability.shape(),&output_probability));
             OP_REQUIRES_OK(context,context->allocate_output(3,_mask.shape(),&output_mask));
-            OP_REQUIRES_OK(context,context->allocate_output(4,_mask_area.shape(),&output_mask_area));
 
             if(!output_bboxes->CopyFrom(_bboxes,_bboxes.shape()))
                 return;
             if(!output_labels->CopyFrom(_labels,_labels.shape()))
                 return;
             if(!output_probability->CopyFrom(_probability,_probability.shape()))
-                return;
-            if(!output_mask_area->CopyFrom(_mask_area,_mask_area.shape()))
                 return;
             if(!output_mask->CopyFrom(_mask,_mask.shape()))
                 return;
@@ -159,7 +152,6 @@ class QcPostProcessOp: public OpKernel {
 
             auto o_probability = output_probability->template tensor<T,1>();
             auto o_bboxes = output_bboxes->template tensor<T,2>();
-            auto o_mask_area = output_mask_area->template tensor<T,1>();
             auto o_mask = output_mask->template tensor<uint8_t,3>();
 
             for(auto & info:knife_mask_info) {
@@ -196,7 +188,6 @@ class QcPostProcessOp: public OpKernel {
                     float y_min = 1e8;
                     float x_max = -1;
                     float y_max = -1;
-                    float mask_area = 0.0;
                     float prob = 0.0f;
                     vector<bbox_t> merge_bboxes_data;
                     vector<mask_t> merge_mask_data;
@@ -206,7 +197,6 @@ class QcPostProcessOp: public OpKernel {
                         merge_bboxes_data.push_back(o_bboxes.chip(r_index,0));
                         merge_mask_data.push_back(o_mask.chip(r_index,0));
 
-                        mask_area += o_mask_area(r_index);
                         prob = max<float>(prob,o_probability(r_index));
                     }
                     auto merged_data = merge_bboxes(merge_bboxes_data,merge_mask_data);
@@ -215,7 +205,6 @@ class QcPostProcessOp: public OpKernel {
 
                     o_bboxes.chip(r_index,0) = get<0>(merged_data);
                     o_mask.chip(r_index,0) = get<1>(merged_data);
-                    o_mask_area(r_index) = mask_area;
                     o_probability(r_index) = prob;
 
                     for(auto j=1; j<indexs.size(); ++j) {
@@ -231,7 +220,6 @@ class QcPostProcessOp: public OpKernel {
             if(infos.empty()) 
                 return;
 
-            cout<<"---------------------------------------------------------"<<endl;
 
             for(auto i=0; i<infos.size()-1; ++i) {
                 auto info0 = infos[i];
@@ -245,13 +233,11 @@ class QcPostProcessOp: public OpKernel {
                     KnifeMaskInfo ref_info = infos[indexs.back()];
                     const auto info1 = infos[j];
                     const auto angle = ref_info.angle;
-                    cout<<ref_info.center_x<<","<<ref_info.center_y<<","<<ref_info.angle<<":"<<info1.center_x<<","<<info1.center_y<<","<<info1.angle<<endl;
                     if(fabs(info1.angle-angle)>angle_threshold_)
                         continue;
                      auto delta_x = info1.center_x-ref_info.center_x;
                      auto delta_y = info1.center_y-ref_info.center_y;
                      auto pos_angle = atan2(delta_y,delta_x)*180/M_PI;
-                     cout<<"pos_angle:"<<pos_angle<<endl;
                      if(pos_angle<=-90) {
                          pos_angle = 180.0+pos_angle;
                      } else if(pos_angle>90) {
@@ -268,6 +254,9 @@ class QcPostProcessOp: public OpKernel {
                     if(info0.width<info0.height*kMinKnifeRatio) {
                         info0.statu.set(KMIS_NEED_UPDATE_PROBABILITY);
                         info0.probability = info0.probability/2;
+                    } else if(info0.width<info0.height*kDecayKnifeRatio) {
+                        info0.statu.set(KMIS_NEED_UPDATE_PROBABILITY);
+                        info0.probability = info0.probability-0.1;
                     }
                     continue;
                 }
@@ -288,7 +277,6 @@ class QcPostProcessOp: public OpKernel {
                 const auto fill_value = (info0.width+info1.width)/2;
 
                 if(fill_value<distance/4) {
-                    cout<<"Skip..."<<endl;
                     continue;
                 }
 

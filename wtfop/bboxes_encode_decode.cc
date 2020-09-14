@@ -17,6 +17,7 @@
 #include "tensorflow/core/framework/common_shape_fns.h"
 #include "tensorflow/core/util/work_sharder.h"
 #include "bboxes.h"
+#include "bboxes_encode.h"
 #include "wtoolkit.h"
 #include "wtoolkit_cuda.h"
 #include <future>

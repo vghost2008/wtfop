@@ -816,10 +816,10 @@ class FillBoxesOp: public OpKernel {
 			const Tensor &_image      = context->input(0);
 			const Tensor &_bboxes     = context->input(1);
 
-			OP_REQUIRES(context, _image.dims() == 2, errors::InvalidArgument("images data must be 2-dimensional"));
+			OP_REQUIRES(context, _image.dims() == 3, errors::InvalidArgument("images data must be 3-dimensional"));
 			OP_REQUIRES(context, _bboxes.dims() == 2, errors::InvalidArgument("boxes data must be 2-dimensional"));
 
-			auto          image       = _image.tensor<T,2>();
+			auto          image       = _image.tensor<T,3>();
 			const auto    bboxes      = _bboxes.tensor<T,2>();
             const auto    box_nr      = _bboxes.dim_size(0);
 
@@ -828,7 +828,7 @@ class FillBoxesOp: public OpKernel {
 
 			OP_REQUIRES_OK(context,context->allocate_output(0,output_shape,&output_tensor));
 
-            auto out_tensor = output_tensor->tensor<T,2>();
+            auto out_tensor = output_tensor->tensor<T,3>();
             out_tensor = image;
             for(auto i=0; i<box_nr; ++i) 
                 draw_a_box(out_tensor,bboxes.chip(i,0));
@@ -841,17 +841,20 @@ class FillBoxesOp: public OpKernel {
                 const auto xmax = min<float>(image.dimension(1),box(3));
                 const auto ymin = max<int>(0,box(0));
                 const auto ymax = min<float>(image.dimension(0),box(2));
+                const auto channel = image.dimension(2);
 
                 if(include_last_)
                     for(int x=xmin; x<=xmax; ++x) {
                         for(int y=ymin; y<=ymax; ++y) {
-                            image(y,x) = v_;
+                            for(auto z=0; z<channel; ++z)
+                                image(y,x,z) = v_;
                         }
                     }
                 else
                     for(int x=xmin; x<xmax; ++x) {
                         for(int y=ymin; y<ymax; ++y) {
-                            image(y,x) = v_;
+                            for(auto z=0; z<channel; ++z)
+                                image(y,x,z) = v_;
                         }
                     }
             }
