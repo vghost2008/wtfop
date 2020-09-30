@@ -533,6 +533,7 @@ REGISTER_OP("BoxesNmsNr2")
 	.Attr("k:int")
 	.Attr("threshold:float")
 	.Attr("fast_mode:bool")
+	.Attr("allow_less_output:bool=False")
     .Input("bottom_box: T")
     .Input("classes:int32")
     .Input("confidence:T")
@@ -541,10 +542,18 @@ REGISTER_OP("BoxesNmsNr2")
 	.Output("output_index:int32")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
 			int k = 0;
+            bool allow_less_output = false;
 			c->GetAttr("k",&k);
+			c->GetAttr("allow_less_output",&allow_less_output);
+            if(allow_less_output) {
+			c->set_output(0, c->Matrix(-1, 4));
+			c->set_output(1, c->Vector(-1));
+			c->set_output(2, c->Vector(-1));
+            } else {
 			c->set_output(0, c->Matrix(k, 4));
 			c->set_output(1, c->Vector(k));
 			c->set_output(2, c->Vector(k));
+            }
 			return Status::OK();
 			});
 
@@ -566,6 +575,7 @@ class BoxesNmsNr2Op: public OpKernel {
 			OP_REQUIRES_OK(context, context->GetAttr("threshold", &threshold_));
 			OP_REQUIRES_OK(context, context->GetAttr("fast_mode", &fast_mode_));
 			OP_REQUIRES_OK(context, context->GetAttr("k", &k_));
+			OP_REQUIRES_OK(context, context->GetAttr("allow_less_output", &allow_less_output_));
             if(k_ <= 0) k_ = 1;
 		}
 
@@ -588,11 +598,11 @@ class BoxesNmsNr2Op: public OpKernel {
 			const auto   loop_end              = data_nr-1;
 
 
-            if(k_>data_nr) {
-                cout<<"Error input size is less than require ("<<data_nr<<" vs "<<k_<<")."<<endl;
+            if((k_>data_nr) && (!allow_less_output_)) {
+                cout<<"ERROR NMSNR2 input size is less than require ("<<data_nr<<" vs "<<k_<<")."<<endl;
             }
 
-            {
+            if(k_<data_nr){
 				for(auto i=0; i<loop_end; ++i) {
 					if(!keep_mask.at(i)) continue;
 					const auto iclass = bottom_classes_flat[i];
@@ -608,53 +618,58 @@ class BoxesNmsNr2Op: public OpKernel {
 			auto out_size = count(keep_mask.begin(),keep_mask.end(),true);
 
             if(out_size<k_) {
-                /*
-                 * 处理返回的box过少的情况
-                 */
-                if(fast_mode_) {
+                if(k_<data_nr) {
                     /*
-                     * 快速模式，从前往后加入已经删除的box
+                     * 处理返回的box过少的情况
                      */
-                    auto nr = k_-out_size;
-                    for(auto it = keep_mask.begin(); it!=keep_mask.end(); ++it) {
-                        if((*it) == false) {
-                            *it = true;
-                            --nr;
-                            if(0 == nr) break;
-                        }
-                    }
-                } else {
-                    /*
-                     * 使用启发的方式添加box
-                     */
-                    auto delta = k_-out_size;
-                    vector<InterData> datas;
-                    datas.reserve((data_nr-out_size)/2);
-
-                    for(auto it=keep_mask.begin(); it!=keep_mask.end(); ++it) 
-                        if((*it) == false) {
-                            auto index = std::distance(keep_mask.begin(),it);
-                            auto score = confidence_flat.data()[index];
-                            for(auto kt=keep_mask.begin(); kt != it; ++kt) {
-                                if((*kt) == false) 
-                                    continue;
-                                auto index0 = std::distance(keep_mask.begin(),kt);
-                                auto iou = bboxes_jaccard(bottom_box_flat+index*4,bottom_box_flat+index0*4);
-                                score *= (1.0-iou);
+                    if(fast_mode_) {
+                        /*
+                         * 快速模式，从前往后加入已经删除的box
+                         */
+                        auto nr = k_-out_size;
+                        for(auto it = keep_mask.begin(); it!=keep_mask.end(); ++it) {
+                            if((*it) == false) {
+                                *it = true;
+                                --nr;
+                                if(0 == nr) break;
                             }
-                            datas.emplace_back(int(index),score);
                         }
-                    for(auto x=0; x<delta; ++x) {
-                        auto jt = max_element(datas.begin(),datas.end());
-                        const auto index = jt->index;
-                        keep_mask[jt->index] = true;
-                        datas.erase(jt);
-                        for(auto jt=datas.begin(); jt!=datas.end(); ++jt) {
-                            auto index0 = jt->index;
-                            auto iou = bboxes_jaccard(bottom_box_flat+index*4,bottom_box_flat+index0*4);
-                            jt->score *= (1.0-iou);
+                    } else {
+                        /*
+                         * 使用启发的方式添加box
+                         */
+                        auto delta = k_-out_size;
+                        vector<InterData> datas;
+                        datas.reserve((data_nr-out_size)/2);
+
+                        for(auto it=keep_mask.begin(); it!=keep_mask.end(); ++it) 
+                            if((*it) == false) {
+                                auto index = std::distance(keep_mask.begin(),it);
+                                auto score = confidence_flat.data()[index];
+                                for(auto kt=keep_mask.begin(); kt != it; ++kt) {
+                                    if((*kt) == false) 
+                                        continue;
+                                    auto index0 = std::distance(keep_mask.begin(),kt);
+                                    auto iou = bboxes_jaccard(bottom_box_flat+index*4,bottom_box_flat+index0*4);
+                                    score *= (1.0-iou);
+                                }
+                                datas.emplace_back(int(index),score);
+                            }
+                        for(auto x=0; x<delta; ++x) {
+                            auto jt = max_element(datas.begin(),datas.end());
+                            const auto index = jt->index;
+                            keep_mask[jt->index] = true;
+                            datas.erase(jt);
+                            for(auto jt=datas.begin(); jt!=datas.end(); ++jt) {
+                                auto index0 = jt->index;
+                                auto iou = bboxes_jaccard(bottom_box_flat+index*4,bottom_box_flat+index0*4);
+                                jt->score *= (1.0-iou);
+                            }
                         }
                     }
+                    out_size = k_;
+                } else if(allow_less_output_)  {
+                    out_size = data_nr;
                 }
             } else if(out_size>k_) {
               /*
@@ -668,8 +683,8 @@ class BoxesNmsNr2Op: public OpKernel {
                         if(0 == nr) break;
                     }
                 }
+                out_size = k_;
             }
-            out_size = k_;
 
 			int dims_2d[2] = {int(out_size),4};
 			int dims_1d[1] = {int(out_size)};
@@ -705,6 +720,7 @@ class BoxesNmsNr2Op: public OpKernel {
 				++j;
 				if(j>=out_size) break;
 			}
+            /*
             if(j<out_size) {
 				cout<<"out size = "<<out_size<<", in size = "<<data_nr<<", j= "<<j<<std::endl;
                 auto i = data_nr-1;
@@ -715,12 +731,14 @@ class BoxesNmsNr2Op: public OpKernel {
                     oindex(j) = i;
                 }
             }
+            */
 		}
 	private:
-		bool  classes_wise_ = true;
-		float threshold_    = 0.0;
-		int   k_            = 0;
-		bool  fast_mode_    = false;
+		bool  classes_wise_      = true;
+		float threshold_         = 0.0;
+		int   k_                 = 0;
+		bool  fast_mode_         = false;
+		bool  allow_less_output_ = false;
 };
 REGISTER_KERNEL_BUILDER(Name("BoxesNmsNr2").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesNmsNr2Op<CPUDevice, float>);
 /*

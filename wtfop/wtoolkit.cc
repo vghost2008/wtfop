@@ -1570,14 +1570,15 @@ class SetValueOp: public OpKernel {
             const Tensor &_tensor        = context->input(0);
             const Tensor &_v             = context->input(1);
             const Tensor &_index         = context->input(2);
+
+            OP_REQUIRES(context, _index.dims()==2, errors::InvalidArgument("index must be 2-dimensional"));
+
             auto          tensor         = _tensor.template flat<T>().data();
             auto          v              = _v.template flat<T>().data();
             auto          indexs         = _index.template tensor<int,2>();
             auto          dim_nr         = _tensor.dims();
             auto          skip_dim_nr    = _index.dim_size(1);
             const auto    block_size     = _v.NumElements();
-
-            OP_REQUIRES(context, _index.dims()==2, errors::InvalidArgument("index must be 2-dimensional"));
 
             Tensor* output_data = NULL;
 

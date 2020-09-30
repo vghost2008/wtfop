@@ -4,6 +4,8 @@ from tensorflow.python.framework import ops
 import os
 import numpy as np
 from collections import Iterable
+import traceback
+import sys
 
 ops.NotDifferentiable("BoxesNms")
 ops.NotDifferentiable("EBoxesNms")
@@ -21,7 +23,6 @@ ops.NotDifferentiable("BoxesSoftNms")
 ops.NotDifferentiable("LabelType")
 ops.NotDifferentiable("IntHash")
 ops.NotDifferentiable("AnchorGenerator")
-ops.NotDifferentiable("AdjacentMatrixGenerator")
 ops.NotDifferentiable("BoxesMatchWithPred")
 ops.NotDifferentiable("SampleLabels")
 ops.NotDifferentiable("GetBoxesDeltas")
@@ -49,6 +50,7 @@ his_random_select = wtfop_module.his_random_select
 item_assign= wtfop_module.item_assign
 qc_post_process = wtfop_module.qc_post_process 
 merge_instance_by_mask = wtfop_module.merge_instance_by_mask 
+adjacent_matrix_generator_by_iouv2 = wtfop_module.adjacent_matrix_generator_by_iou_v2
 #deform_conv_op = wtfop_module.deform_conv_op
 #deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
 
@@ -79,17 +81,17 @@ def boxes_match(boxes, gboxes, glabels, glens,threshold=0.7):
     if glens.dtype is not tf.int32:
         glens = tf.cast(glens,tf.int32)
     out = wtfop_module.boxes_match(boxes=boxes, gboxes=gboxes, glabels=glabels, glens=glens,threshold=threshold)
-    return out[0],out[1]
+    return out[0],out[1],out[2]
 
-def boxes_match_with_pred(boxes, plabels,gboxes, glabels, glens,threshold=0.7):
+def boxes_match_with_pred(boxes, plabels,pprobs,gboxes, glabels, glens,threshold=0.7,is_binary_plabels=False):
     if glabels.dtype is not tf.int32:
         glabels = tf.cast(glabels,tf.int32)
     if plabels.dtype is not tf.int32:
         plabels = tf.cast(plabels,tf.int32)
     if glens.dtype is not tf.int32:
         glens = tf.cast(glens,tf.int32)
-    out = wtfop_module.boxes_match_with_pred(boxes=boxes, plabels=plabels,gboxes=gboxes, glabels=glabels, glens=glens,threshold=threshold)
-    return out[0],out[1]
+    out = wtfop_module.boxes_match_with_pred(boxes=boxes, plabels=plabels,pprobs=pprobs,gboxes=gboxes, glabels=glabels, glens=glens,threshold=threshold,is_binary_plabels=is_binary_plabels)
+    return out[0],out[1],out[2]
 
 def boxes_match_with_pred2(boxes, plabels,gboxes, glabels, glens,threshold=0.7,prio_scaling=[0.1,0.1,0.2,0.2]):
     if glabels.dtype is not tf.int32:
@@ -139,13 +141,14 @@ def boxes_nms_nr(bboxes, classes, confidence=None,k=128,max_loop=5,classes_wise=
 def _boxes_nms_nr_grad(op, grad, _,_0):
   return [None,None]
 
-def boxes_nms_nr2(bboxes, classes, k=128,threshold=0.8,classes_wise=True,confidence=None,fast_mode=False):
+def boxes_nms_nr2(bboxes, classes, k=128,threshold=0.8,classes_wise=True,confidence=None,fast_mode=False,allow_less_output=False):
     if classes.dtype != tf.int32:
         classes = tf.cast(classes,tf.int32)
     if confidence is None:
         confidence = tf.ones_like(classes,tf.float32)
     out = wtfop_module.boxes_nms_nr2(bottom_box=bboxes,classes=classes,confidence=confidence,k=k,threshold=threshold,classes_wise=classes_wise,
-                                    fast_mode=fast_mode)
+                                    fast_mode=fast_mode,
+                                    allow_less_output=allow_less_output)
     return out[0],out[1],tf.cast(out[2],tf.int32)
 
 
@@ -303,9 +306,13 @@ def plane_position_embedding(size,ref_size=[512,512]):
 
 def set_value(tensor,v,index):
     if index.get_shape().ndims is None or index.get_shape().ndims<2:
+        print(f"\n-------------------------------------------------------")
+        print(f"WARNING reset index shape {traceback.format_exc()}")
+        print(f"-------------------------------------------------------\n")
         index = tf.reshape(index,[1,-1])
     if index.dtype is not tf.int32:
         index = tf.cast(index,tf.int32)
+    #tensor = tf.Print(tensor,["shape:",tf.shape(tensor),tf.shape(v),tf.shape(index)])
     out = wtfop_module.set_value(tensor=tensor,v=v,index=index)
     return out 
 
