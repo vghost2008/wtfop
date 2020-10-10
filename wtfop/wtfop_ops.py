@@ -51,6 +51,7 @@ item_assign= wtfop_module.item_assign
 qc_post_process = wtfop_module.qc_post_process 
 merge_instance_by_mask = wtfop_module.merge_instance_by_mask 
 adjacent_matrix_generator_by_iouv2 = wtfop_module.adjacent_matrix_generator_by_iou_v2
+adjacent_matrix_generator_by_iouv3 = wtfop_module.adjacent_matrix_generator_by_iou_v3
 #deform_conv_op = wtfop_module.deform_conv_op
 #deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
 

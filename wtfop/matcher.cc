@@ -293,10 +293,11 @@ class BoxesMatchOp: public OpKernel {
 
 			OP_REQUIRES_OK(context, context->allocate_output(0, outshape, &output_classes));
 			OP_REQUIRES_OK(context, context->allocate_output(1, outshape, &output_scores));
+			OP_REQUIRES_OK(context, context->allocate_output(2, outshape, &output_indexs));
 
 			auto oclasses     = output_classes->template tensor<int,2>();
 			auto oscores      = output_scores->template tensor<T,2>();
-			auto oindexs      = output_scores->template tensor<int,2>();
+			auto oindexs      = output_indexs->template tensor<int,2>();
 
             oclasses.setZero();
             oscores.setZero();
