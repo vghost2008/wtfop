@@ -187,3 +187,104 @@ class MatcherUnit<Eigen::GpuDevice,T> {
 #else
 //#error "No cuda support"
 #endif
+template <typename Device,typename T>
+class MatcherV2Unit {
+};
+template <typename T>
+class MatcherV2Unit<Eigen::ThreadPoolDevice,T> {
+	public:
+		struct IOUIndex{
+			int index; //与当前box对应的gbbox序号
+			float iou;//与其对应的gbbox的IOU
+            float iou1;
+		};
+		explicit MatcherV2Unit(const std::vector<float>& threshold) 
+			:threshold_(threshold)
+            {
+			}
+		   auto operator()(
+		   const Eigen::Tensor<T,2,Eigen::RowMajor>& boxes,
+		   const Eigen::Tensor<T,2,Eigen::RowMajor>& gboxes,
+		   const Eigen::Tensor<int,1,Eigen::RowMajor>& glabels)
+			{
+                int                   data_nr              = boxes.dimension(0);
+                int                   gdata_nr             = gboxes.dimension(0);
+                auto                  out_labels           = Eigen::Tensor<int,1,Eigen::RowMajor>(data_nr);
+                auto                  out_scores           = Eigen::Tensor<T,1,Eigen::RowMajor>(data_nr);
+                auto                  outindex             = Eigen::Tensor<int,1,Eigen::RowMajor>(data_nr);
+                std::vector<IOUIndex> iou_indexs(data_nr     ,IOUIndex({-1,0.0}));                          //默认box不与任何ground truth box相交，iou为0
+
+				for(auto i=0; i<data_nr; ++i) {
+					out_labels(i) = 0;  //默认所有的都为背景
+					out_scores(i) = 0;
+                    outindex(i) = -1;
+				}
+                const auto kThreadNr = std::max(1,std::min({40,gdata_nr*data_nr/20000,gdata_nr}));
+                const auto kDataPerThread = gdata_nr/kThreadNr;
+				/*
+				 * 遍历每一个ground truth box
+				 */
+                std::mutex mtx;
+                std::list<std::future<void>> results;
+                auto shard = [&](int start,int limit) {
+				for(auto i=start; i<limit; ++i) {
+					const      Eigen::Tensor<T,1,Eigen::RowMajor> gbox= gboxes.chip(i,0);
+					const auto glabel          = glabels(i);
+					auto       max_index       = -1;
+					auto       max_scores      = -1.0;
+					auto       max_scores1     = -1.0;
+
+					/*
+					 * 计算ground truth box与每一个候选box的jaccard得分
+					 */
+					for(auto j=0; j<data_nr; ++j) {
+						const Eigen::Tensor<T,1,Eigen::RowMajor> box       = boxes.chip(j,0);
+						auto      jaccard   = bboxes_jaccardv1(gbox,box);
+                        auto      jaccard1  = bboxes_jaccard_of_box0v1(gbox,box);
+
+						if(jaccard<MIN_SCORE_FOR_POS_BOX) continue;
+
+                        if((jaccard>max_scores)) {
+                            max_scores = jaccard;
+                            max_scores1 = jaccard1;
+                            max_index = j;
+                        }
+
+
+                        {
+                            std::lock_guard<std::mutex> g(mtx);
+
+                            auto       &iou_index = iou_indexs[j];
+
+                            if(jaccard>iou_index.iou) {
+                                iou_index.iou = jaccard;
+                                iou_index.iou1 = jaccard1;
+                                iou_index.index = i;
+                                out_scores(j)  =  jaccard;
+                                out_labels(j)  =  glabel;
+                                outindex(j)    =  i;
+                            }
+                        }
+					}
+				} //end for
+                };
+                for(auto i=0; i<gdata_nr; i+=kDataPerThread) {
+                    results.emplace_back(std::async(std::launch::async,[i,gdata_nr,kDataPerThread,&shard](){shard(i,std::min(gdata_nr,i+kDataPerThread));}));
+                }
+                results.clear();
+
+				for(auto j=0; j<data_nr; ++j) {
+					const auto& iou_index = iou_indexs[j];
+                    if((iou_index.iou>=threshold_[0]) && (iou_index.iou1>=threshold_[1])) {
+						continue;
+					} else {
+                        outindex(j) = -1;
+                        out_labels(j) = 0;
+					} 
+				}
+
+				return std::make_tuple(out_labels,out_scores,outindex);
+			}
+	private:
+		const std::vector<float> threshold_;
+};

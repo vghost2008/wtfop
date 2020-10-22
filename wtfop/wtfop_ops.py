@@ -246,6 +246,15 @@ def matcher(bboxes, gboxes,glabels,length,pos_threshold=0.7,neg_threshold=0.3,ma
     pos_threshold=pos_threshold,neg_threshold=neg_threshold,max_overlap_as_pos=max_overlap_as_pos,force_in_gtbox=force_in_gtbox)
     return out[0],out[1],out[2]
 
+def matcherv2(bboxes, gboxes,glabels,length,threshold=[0.3,0.3]):
+    if glabels.dtype != tf.int32:
+        glabels= tf.cast(glabels,tf.int32)
+    if bboxes.get_shape().ndims != 3:
+        bboxes = tf.expand_dims(bboxes,axis=0)
+    out = wtfop_module.matcher_v2(bottom_boxes=bboxes,bottom_gboxes=gboxes,bottom_glength=length,bottom_glabels=glabels,
+    threshold=threshold)
+    return out[0],out[1],out[2]
+
 def get_boxes_deltas(boxes, gboxes,labels,indices,scale_weights=[10,10,5,5]):
     if labels.dtype != tf.int32:
         labels= tf.cast(labels,tf.int32)
