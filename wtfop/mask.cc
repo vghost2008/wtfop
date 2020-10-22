@@ -661,32 +661,34 @@ class MergeInstanceByMaskOp: public OpKernel {
 
             do {
                 is_merged = false;
-                for(auto i=0; i<in_bboxes_data.size()-1; ++i) {
-                    if(need_remove[i])
-                        continue;
-                    auto& bbox0 = in_bboxes_data[i];
-                    for(auto j=i+1; j<in_bboxes_data.size(); ++j) {
-                        if(need_remove[j])
+                if(in_bboxes_data.size()>1) {
+                    for(auto i=0; i<in_bboxes_data.size()-1; ++i) {
+                        if(need_remove[i])
                             continue;
-                        if(in_labels_data[i] != in_labels_data[j]) 
-                            continue;
+                        auto& bbox0 = in_bboxes_data[i];
+                        for(auto j=i+1; j<in_bboxes_data.size(); ++j) {
+                            if(need_remove[j])
+                                continue;
+                            if(in_labels_data[i] != in_labels_data[j]) 
+                                continue;
 
-                        auto &bbox1 = in_bboxes_data[j];
-                        auto  dis   = bboxes_distance(in_bboxes_data[i],in_bboxes_data[j]);
+                            auto &bbox1 = in_bboxes_data[j];
+                            auto  dis   = bboxes_distance(in_bboxes_data[i],in_bboxes_data[j]);
 
-                        if(dis > test_threshold_)
-                            continue;
+                            if(dis > test_threshold_)
+                                continue;
 
-                        try {
-                            auto res = merge_bboxes({bbox0,bbox1},{in_mask_data[i],in_mask_data[j]});
+                            try {
+                                auto res = merge_bboxes({bbox0,bbox1},{in_mask_data[i],in_mask_data[j]});
 
-                            in_mask_data[i] = get<1>(res);
-                            in_bboxes_data[i] = get<0>(res);
-                            in_indices_data[j] = in_indices_data[i];
-                            in_probability[i] = max(in_probability[i],in_probability[j]);
-                            need_remove[j] = true;
-                            is_merged = true;
-                        }catch(...) {
+                                in_mask_data[i] = get<1>(res);
+                                in_bboxes_data[i] = get<0>(res);
+                                in_indices_data[j] = in_indices_data[i];
+                                in_probability[i] = max(in_probability[i],in_probability[j]);
+                                need_remove[j] = true;
+                                is_merged = true;
+                            }catch(...) {
+                            }
                         }
                     }
                 }

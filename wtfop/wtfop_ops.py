@@ -52,6 +52,7 @@ qc_post_process = wtfop_module.qc_post_process
 merge_instance_by_mask = wtfop_module.merge_instance_by_mask 
 adjacent_matrix_generator_by_iouv2 = wtfop_module.adjacent_matrix_generator_by_iou_v2
 adjacent_matrix_generator_by_iouv3 = wtfop_module.adjacent_matrix_generator_by_iou_v3
+adjacent_matrix_generator_by_iouv4 = wtfop_module.adjacent_matrix_generator_by_iou_v4
 #deform_conv_op = wtfop_module.deform_conv_op
 #deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
 
@@ -92,6 +93,17 @@ def boxes_match_with_pred(boxes, plabels,pprobs,gboxes, glabels, glens,threshold
     if glens.dtype is not tf.int32:
         glens = tf.cast(glens,tf.int32)
     out = wtfop_module.boxes_match_with_pred(boxes=boxes, plabels=plabels,pprobs=pprobs,gboxes=gboxes, glabels=glabels, glens=glens,threshold=threshold,is_binary_plabels=is_binary_plabels)
+    return out[0],out[1],out[2]
+
+def boxes_match_with_predv3(boxes, plabels,pprobs,gboxes, glabels, glens,threshold=0.7,is_binary_plabels=False,sort_by_probs=False):
+    if glabels.dtype is not tf.int32:
+        glabels = tf.cast(glabels,tf.int32)
+    if plabels.dtype is not tf.int32:
+        plabels = tf.cast(plabels,tf.int32)
+    if glens.dtype is not tf.int32:
+        glens = tf.cast(glens,tf.int32)
+    out = wtfop_module.boxes_match_with_pred_v3(boxes=boxes, plabels=plabels,pprobs=pprobs,gboxes=gboxes, glabels=glabels, glens=glens,threshold=threshold,is_binary_plabels=is_binary_plabels,
+    sort_by_probs=sort_by_probs)
     return out[0],out[1],out[2]
 
 def boxes_match_with_pred2(boxes, plabels,gboxes, glabels, glens,threshold=0.7,prio_scaling=[0.1,0.1,0.2,0.2]):

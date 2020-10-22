@@ -649,3 +649,147 @@ class BoxesMatchWithPred2Op: public OpKernel {
 		vector<float> prio_scaling;
 };
 REGISTER_KERNEL_BUILDER(Name("BoxesMatchWithPred2").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesMatchWithPred2Op<CPUDevice, float>);
+
+/*
+ * 将boxes先与pred_bboxes匹配（通过pred_labels指定）如果IOU大于指定的阀值则为预测正确，没有与pred_bboxes匹配的bboxes与gboxes匹配，
+ * IOU最大且不小于threadshold的标记为相应的label, 即1个gboxes最多与一个boxes相对应
+ * boxes:[batch_size,N,4](y,x,h,w)
+ * plabels:[batch_size,N]预测的类别
+ * gboxes:[batch_size,M,4]
+ * glabels:[batch_size,M] 0表示背景
+ * glens:[batch_size] 用于表明gboxes中的有效boxes数量
+ * output_labels:[batch_size,N]
+ * output_scores:[batch_size,N]
+ * output_indexs:[batch_size,N] #gbboxes的index
+ * threashold: IOU threshold
+ */
+REGISTER_OP("BoxesMatchWithPredV3")
+    .Attr("T: {float, double,int32}")
+	.Attr("threshold:float")
+	.Attr("is_binary_plabels:bool=False")
+	.Attr("sort_by_probs:bool=True")
+    .Input("boxes: T")
+    .Input("plabels: int32")
+    .Input("pprobs: T")
+    .Input("gboxes: T")
+	.Input("glabels:int32")
+	.Input("glens:int32")
+	.Output("output_labels:int32")
+	.Output("output_scores:T")
+	.Output("output_indexs:int32")
+	.SetShapeFn([](shape_inference::InferenceContext* c) {
+		    auto boxes_shape = c->input(0);
+			shape_inference::ShapeHandle outshape;
+			c->Subshape(boxes_shape,0,2,&outshape);
+			c->set_output(0, outshape);
+			c->set_output(1, outshape);
+			c->set_output(2, outshape);
+			return Status::OK();
+			});
+
+template <typename Device, typename T>
+class BoxesMatchWithPredV3Op: public OpKernel {
+    private:
+        struct PInfo {
+            int index;
+            float probs;
+        };
+	public:
+		explicit BoxesMatchWithPredV3Op(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("threshold", &threshold_));
+			OP_REQUIRES_OK(context, context->GetAttr("is_binary_plabels", &is_binary_plabels_));
+			OP_REQUIRES_OK(context, context->GetAttr("sort_by_probs", &sort_by_probs_));
+		}
+
+		void Compute(OpKernelContext* context) override
+		{
+			const Tensor &_boxes   = context->input(0);
+			const Tensor &_plabels = context->input(1);
+			const Tensor &_pprobs = context->input(2);
+			const Tensor &_gboxes  = context->input(3);
+			const Tensor &_glabels = context->input(4);
+			const Tensor &_glens   = context->input(5);
+
+			OP_REQUIRES(context, _boxes.dims() == 3, errors::InvalidArgument("box data must be 3-dimensional"));
+			OP_REQUIRES(context, _gboxes.dims() == 3, errors::InvalidArgument("gboxes data must be 3-dimensional"));
+			OP_REQUIRES(context, _glabels.dims() == 2, errors::InvalidArgument("glabels data must be 2-dimensional"));
+			OP_REQUIRES(context, _plabels.dims() == 2, errors::InvalidArgument("plabels data must be 2-dimensional"));
+			OP_REQUIRES(context, _pprobs.dims() == 2, errors::InvalidArgument("pprobs data must be 2-dimensional"));
+			OP_REQUIRES(context, _glens.dims() == 1, errors::InvalidArgument("glens data must be 1-dimensional"));
+
+			auto          boxes    = _boxes.tensor<T,3>();
+			auto          plabels  = _plabels.tensor<int,2>();
+			auto          pprobs   = _pprobs.tensor<T,2>();
+			auto          gboxes   = _gboxes.tensor<T,3>();
+			auto          glabels  = _glabels.tensor<int,2>();
+			auto          glens    = _glens.tensor<int,1>();
+
+			const int batch_nr  = _boxes.dim_size(0);
+			const int boxes_nr  = _boxes.dim_size(1);
+			const int gboxes_nr = _gboxes.dim_size(1);
+			int dims_2d[2] = {batch_nr,boxes_nr};
+			TensorShape  outshape;
+			Tensor      *output_classes     = NULL;
+			Tensor      *output_scores      = NULL;
+			Tensor      *output_indexs      = NULL;
+
+            if(plabels.dimension(1) != boxes.dimension(1)) {
+                cout<<"Error plabels dimension 1"<<endl;
+            }
+
+			TensorShapeUtils::MakeShape(dims_2d, 2, &outshape);
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, outshape, &output_classes));
+			OP_REQUIRES_OK(context, context->allocate_output(1, outshape, &output_scores));
+			OP_REQUIRES_OK(context, context->allocate_output(2, outshape, &output_indexs));
+
+			auto oclasses     = output_classes->template tensor<int,2>();
+			auto oscores      = output_scores->template tensor<T,2>();
+			auto oindexs      = output_indexs->template tensor<int,2>();
+
+            oclasses.setZero();
+            oscores.setZero();
+            oindexs.setConstant(-1);
+
+            for(auto i=0; i<batch_nr; ++i) {
+                for(auto j=0; j<glens(i); ++j) {
+                    auto max_scores = -1.0;
+                    auto index      = -1;
+                    vector<PInfo> infos(boxes_nr);
+                    for(auto k=0; k<boxes_nr; ++k) {
+                        infos[k].index = k;
+                        infos[k].probs = pprobs(i,k);
+                    }
+                    if(sort_by_probs_)
+                        sort(infos.begin(),infos.end(),[](const auto& lhv,const auto& rhv){ return rhv.probs<lhv.probs;});
+
+                    for(auto _k=0; _k<boxes_nr; ++_k) {
+                        const auto k = infos[_k].index;
+                        const auto plabel = plabels(i,k);
+                        if((is_binary_plabels_ && (plabel == 0)) || ((!is_binary_plabels_) && (plabel != glabels(i,j))))
+                            continue;
+                        if(oclasses(i,k) != 0) continue;
+
+                        Eigen::Tensor<T,1,Eigen::RowMajor> gbox = gboxes.chip(i,0).chip(j,0);
+                        Eigen::Tensor<T,1,Eigen::RowMajor> box = boxes.chip(i,0).chip(k,0);
+                        auto jaccard = bboxes_jaccardv1(gbox,box);
+
+                        if((jaccard>threshold_) && (jaccard>max_scores)) {
+                            max_scores = jaccard;
+                            index = k;
+                        }
+                    }
+                    if(index>=0) {
+                        oclasses(i,index) = glabels(i,j);
+                        oscores(i,index) = max_scores;
+                        oindexs(i,index) = j;
+                    }
+                }
+            }
+		}
+	private:
+		float threshold_;
+        bool is_binary_plabels_ = false;
+        bool sort_by_probs_ = false;
+};
+REGISTER_KERNEL_BUILDER(Name("BoxesMatchWithPredV3").Device(DEVICE_CPU).TypeConstraint<float>("T"), BoxesMatchWithPredV3Op<CPUDevice, float>);
