@@ -1708,3 +1708,58 @@ REGISTER_KERNEL_BUILDER(Name("ItemAssign").Device(DEVICE_CPU).TypeConstraint<boo
 REGISTER_KERNEL_BUILDER(Name("ItemAssign").Device(DEVICE_CPU).TypeConstraint<tensorflow::int64>("T"), ItemAssignOp<CPUDevice, tensorflow::int64>);
 REGISTER_KERNEL_BUILDER(Name("ItemAssign").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), ItemAssignOp<CPUDevice, uint8_t>);
 REGISTER_KERNEL_BUILDER(Name("ItemAssign").Device(DEVICE_CPU).TypeConstraint<int8_t>("T"), ItemAssignOp<CPUDevice, int8_t>);
+/*
+ * 对输入tensor的值计数，如输入[1,1,2,4,3,1,1,] max_value=7,输出
+ * [0,4,1,1,1,0,0,0]
+ */
+REGISTER_OP("Counting")
+    .Attr("T: {int32,int64,uint8,int8}")
+	.Attr("max_value:int")
+    .Input("tensor: T")
+	.Output("data:int32")
+    .SetShapeFn([](shape_inference::InferenceContext* c){
+            int max_value = 0;
+            c->GetAttr("max_value",&max_value);
+            auto shape0 = c->MakeShape({max_value+1});
+			c->set_output(0, shape0);
+			return Status::OK();
+		return Status::OK();
+    });
+
+template <typename Device, typename T>
+class CountingOp: public OpKernel {
+	public:
+		explicit CountingOp(OpKernelConstruction* context) : OpKernel(context) {
+            OP_REQUIRES_OK(context, context->GetAttr("max_value", &max_value_));
+		}
+		void Compute(OpKernelContext* context) override
+        {
+            const Tensor &_tensor     = context->input(0);
+            auto          tensor_flat = _tensor.template flat<T>().data();
+            auto          total_nr = _tensor.NumElements();
+
+
+            Tensor* output_data = NULL;
+            TensorShape  output_shape;
+            const int    dim0[]           = {max_value_+1};
+
+            TensorShapeUtils::MakeShape(dim0,1,&output_shape);
+
+            OP_REQUIRES_OK(context, context->allocate_output(0, output_shape, &output_data));
+
+            auto      oq_tensor = output_data->template flat<int>();
+
+            oq_tensor.setZero();
+
+            for(auto i=0; i<total_nr; ++i) {
+                const auto v = tensor_flat[i];
+                oq_tensor(v) = oq_tensor(v)+1;
+            }
+        }
+   private:
+     int max_value_ = 0;
+};
+REGISTER_KERNEL_BUILDER(Name("Counting").Device(DEVICE_CPU).TypeConstraint<int32_t>("T"), CountingOp<CPUDevice, int32_t>);
+REGISTER_KERNEL_BUILDER(Name("Counting").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), CountingOp<CPUDevice, uint8_t>);
+REGISTER_KERNEL_BUILDER(Name("Counting").Device(DEVICE_CPU).TypeConstraint<int8_t>("T"), CountingOp<CPUDevice, int8_t>);
+REGISTER_KERNEL_BUILDER(Name("Counting").Device(DEVICE_CPU).TypeConstraint<tensorflow::int64>("T"), CountingOp<CPUDevice, tensorflow::int64>);

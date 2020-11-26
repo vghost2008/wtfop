@@ -28,7 +28,7 @@ typedef Eigen::GpuDevice GPUDevice;
 /*
  * input:
  * min_size: pos box的最小值
- * max_size: pos box的最大值
+ * max_size: pos box的最大值, FCOS通过这两个值将box分配到不同的层
  * fm: (H,W) 预测层的feature map, 主要用于确定输出大小及stride, 目前没有使用相应的值
  *  gbboxes: [B,box_nr,4] relative coordinate
  * glabels: [B,box_nr]
