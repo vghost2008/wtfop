@@ -56,6 +56,8 @@ adjacent_matrix_generator_by_iouv4 = wtfop_module.adjacent_matrix_generator_by_i
 counting = wtfop_module.counting
 cell_encode_label = wtfop_module.cell_encode_label
 cell_decode_label = wtfop_module.cell_decode_label
+cell_encode_label2 = wtfop_module.cell_encode_label2
+cell_decode_label2 = wtfop_module.cell_decode_label2
 #deform_conv_op = wtfop_module.deform_conv_op
 #deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
 
