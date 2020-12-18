@@ -93,7 +93,16 @@ class CellEncodeLabelOp: public OpKernel {
             for(auto i=0; i<data_nr; ++i) {
                 const auto l = tensor_flat[i];
 
-                o_tensor(i,label_map_level0_[l]) = 1;
+                if(0 == l)
+                    continue;
+
+                auto kt = label_map_level0_.find(l);
+                if(kt == label_map_level0_.end()) {
+                    cout<<"Error label "<<l<<endl;
+                    continue;
+                }
+
+                o_tensor(i,kt->second) = 1;
 
                 auto it = label_map_level1_.find(l);
 
