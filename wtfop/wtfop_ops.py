@@ -58,6 +58,7 @@ cell_encode_label = wtfop_module.cell_encode_label
 cell_decode_label = wtfop_module.cell_decode_label
 cell_encode_label2 = wtfop_module.cell_encode_label2
 cell_decode_label2 = wtfop_module.cell_decode_label2
+bboxes_rotate = wtfop_module.bboxes_rotate
 #deform_conv_op = wtfop_module.deform_conv_op
 #deform_conv_grad_op = wtfop_module.deform_conv_backprop_op
 

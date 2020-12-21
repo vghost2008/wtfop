@@ -452,3 +452,130 @@ class TensorRotateOp: public OpKernel {
 };
 REGISTER_KERNEL_BUILDER(Name("TensorRotate").Device(DEVICE_CPU).TypeConstraint<uint8_t>("T"), TensorRotateOp<CPUDevice, uint8_t>);
 REGISTER_KERNEL_BUILDER(Name("TensorRotate").Device(DEVICE_CPU).TypeConstraint<float>("T"), TensorRotateOp<CPUDevice, float>);
+
+/*
+ * 输入绝对坐标
+ */
+REGISTER_OP("BboxesRotate")
+    .Attr("T: {uint8,float}")
+    .Attr("type:int=0")
+    .Input("bboxes: T")
+    .Input("angle: float")
+    .Input("img_size: int32")
+	.Output("o_bboxes:T")
+    .SetShapeFn([](shape_inference::InferenceContext* c){
+            auto input_shape0 = c->input(0);
+            c->set_output(0, input_shape0);
+			return Status::OK();
+            });
+
+template <typename Device, typename T>
+class BboxesRotateOp: public OpKernel {
+	public:
+		explicit BboxesRotateOp(OpKernelConstruction* context) : OpKernel(context) {
+			OP_REQUIRES_OK(context, context->GetAttr("type", &type_));
+		}
+		void Compute(OpKernelContext* context) override
+		{
+			const auto &_input_bboxes = context->input(0);
+			const auto &_angle     = context->input(1);
+			const auto &_size = context->input(2);
+
+			OP_REQUIRES(context, _input_bboxes.dims() == 2, errors::InvalidArgument("tensor must be a 2-dimensional tensor"));
+			OP_REQUIRES(context, _angle.dims() == 0, errors::InvalidArgument("angle be a 0-dimensional tensor"));
+			OP_REQUIRES(context, _size.dims() == 1, errors::InvalidArgument("size be a 1-dimensional tensor"));
+
+            const auto  img_size      = _size.template flat<int32>().data();
+            const auto  img_height    = img_size[0];
+            const auto  img_width     = img_size[1];
+            const auto  boxes_nr      = _input_bboxes.dim_size(0);
+            auto        input_bboxes  = _input_bboxes.template tensor<T,2>();
+            auto        angle         = _angle.template flat<float>().data()[0];
+            Tensor     *output_tensor = NULL;
+
+			OP_REQUIRES_OK(context, context->allocate_output(0, _input_bboxes.shape(), &output_tensor));
+
+            auto      o_tensor = output_tensor->template tensor<T,2>();
+            const cv::Point2f cp(img_width/2,img_height/2);
+            cv::Mat r = cv::getRotationMatrix2D(cp,angle,1.0);
+            for(auto i=0; i<boxes_nr; ++i) {
+                transform(input_bboxes,i,r,o_tensor);
+            }
+        }
+        template<typename BT0,typename BT1>
+        void transform(const BT0& input_bboxes,int index, const cv::Mat& r,BT1& output_bboxes) {
+            auto points = get_points(input_bboxes,index);
+            vector<cv::Point> out_points(points.size());
+            cv::transform(points,out_points,r);
+            auto xmin = 1e10;
+            auto xmax = 0;
+            auto ymin = 1e10;
+            auto ymax = 0;
+            for(auto& p:out_points) {
+                if(p.x<xmin)
+                    xmin = p.x;
+                if(p.x>xmax)
+                    xmax = p.x;
+                if(p.y<ymin)
+                    ymin = p.y;
+                if(p.y>ymax)
+                    ymax = p.y;
+            }
+            output_bboxes(index,0) = ymin;
+            output_bboxes(index,1) = xmin;
+            output_bboxes(index,2) = ymax;
+            output_bboxes(index,3) = xmax;
+        }
+        template<typename BT> 
+            vector<cv::Point> get_points(const BT& bboxes,int index) {
+                const auto kNr = 100;
+                vector<cv::Point> points;
+                switch(type_) {
+                    case 0:
+                        {
+                            auto ymin = bboxes(index,0);
+                            auto xmin = bboxes(index,1);
+                            auto ymax = bboxes(index,2);
+                            auto xmax = bboxes(index,3);
+                            const auto bw = xmax-xmin;
+                            const auto bh = ymax-ymin;
+                            const auto cx = (xmax+xmin)/2;
+                            const auto cy = (ymax+ymin)/2;
+                            const auto a = bw/2;
+                            const auto b = bh/2;
+                            for(auto i=0; i<kNr; ++i) {
+                                const auto theta = 2*M_PI*i/kNr;
+                                const auto x = cx+a*cos(theta);
+                                const auto y = cy+b*sin(theta);
+                                points.emplace_back(x,y);
+                            }
+                        }
+                        break;
+                    case 1:
+                    default:
+                        {
+                            auto ymin = bboxes(index,0);
+                            auto xmin = bboxes(index,1);
+                            auto ymax = bboxes(index,2);
+                            auto xmax = bboxes(index,3);
+                            const auto bw = xmax-xmin;
+                            const auto bh = ymax-ymin;
+                            const auto cx = (xmax+xmin)/2;
+                            const auto cy = (ymax+ymin)/2;
+                            const auto a = bw/2;
+                            const auto b = bh/2;
+                            points.emplace_back(xmin,ymin);
+                            points.emplace_back(xmin,ymax);
+                            points.emplace_back(xmax,ymax);
+                            points.emplace_back(xmax,ymin);
+                        }
+                        break;
+
+                }
+                return points;
+            }
+    private:
+        int type_ = 0;
+};
+REGISTER_KERNEL_BUILDER(Name("BboxesRotate").Device(DEVICE_CPU).TypeConstraint<double>("T"), BboxesRotateOp<CPUDevice, double>);
+REGISTER_KERNEL_BUILDER(Name("BboxesRotate").Device(DEVICE_CPU).TypeConstraint<float>("T"), BboxesRotateOp<CPUDevice, float>);
