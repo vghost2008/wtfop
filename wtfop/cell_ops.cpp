@@ -176,7 +176,8 @@ class CellDecodeLabelOp: public OpKernel {
                         auto d = i_data+i*C+12;
                         auto it = max_element(d,d+3);
                         auto dis = it-d;
-                        auto p = max<T>(d[dis],tensor(i,0));
+                        //auto p = max<T>(d[dis],tensor(i,0));
+                        auto p = tensor(i,0);
 
                         if(dis==0){
                             o_tensor(i,12) = p;
@@ -187,9 +188,11 @@ class CellDecodeLabelOp: public OpKernel {
                         }
                     } else {
                         if(tensor(i,10)>=tensor(i,11)) {
-                            o_tensor(i,11) = max<T>(tensor(i,0),tensor(i,10));
+                            //o_tensor(i,11) = max<T>(tensor(i,0),tensor(i,10));
+                            o_tensor(i,11) = tensor(i,0);
                         } else {
-                            o_tensor(i,1) = max<T>(tensor(i,0),tensor(i,11));
+                            //o_tensor(i,1) = max<T>(tensor(i,0),tensor(i,11));
+                            o_tensor(i,1) = tensor(i,0);
                         }
                     }
                 }
