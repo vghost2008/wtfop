@@ -788,7 +788,7 @@ class GetImageResizeSizeOp: public OpKernel {
 REGISTER_KERNEL_BUILDER(Name("GetImageResizeSize").Device(DEVICE_CPU), GetImageResizeSizeOp);
 
 /*
- * image[H,W]
+ * image[H,W,C]
  * boxes[N,4], 绝对坐标
  */
 REGISTER_OP("FillBBoxes")

@@ -71,6 +71,11 @@ class MergeCharacterOp: public OpKernel {
          * 用于表示包含字符的一个词，分别表示字符集，方向
          */
         using word_t = tuple<vector<bbox_info_t>,int>;
+        enum DirectionPrefer{
+            DP_NONE,
+            DP_HORIZONTAL,
+            DP_VERTICAL,
+        };
 	public:
 		explicit MergeCharacterOp(OpKernelConstruction* context) : OpKernel(context) {
 			OP_REQUIRES_OK(context, context->GetAttr("expand", &expand_));
@@ -143,7 +148,7 @@ class MergeCharacterOp: public OpKernel {
                         bboxes_type[get<3>(x)] = -1;
                     continue;
                 }
-                auto direction = sort_text_info(cur_bboxes);
+                auto direction = sort_text_info(cur_bboxes,direction_prefer(sbbox,4.0));
                 words.emplace_back(cur_bboxes,direction);
                 auto ids = get_ids(cur_bboxes);
                 res_texts.push_back(ids);
@@ -571,6 +576,14 @@ class MergeCharacterOp: public OpKernel {
         static inline bool is_horizontal(const bbox_t& box) {
             return (box(3)-box(1))>(box(2)-box(0));
         }
+        static inline DirectionPrefer direction_prefer(const bbox_t& box,float scale=4.0) {
+            if((box(3)-box(1))>scale*(box(2)-box(0)))
+                return DP_HORIZONTAL;
+            else if((box(3)-box(1))*scale<(box(2)-box(0)))
+                return DP_VERTICAL;
+            else
+                return DP_NONE;
+        }
         static inline bool is_horizontal(int dlabel) {
             return (dlabel==0)||(dlabel==2);
         }
@@ -595,10 +608,21 @@ class MergeCharacterOp: public OpKernel {
         vector<bbox_t> merge_super_bboxes(const vector<bbox_t>& bboxes) {
             return _merge_super_bboxes(_merge_super_bboxes(bboxes));
         }
-        int sort_text_info(vector<bbox_info_t>& text_info) {
+        int sort_text_info(vector<bbox_info_t>& text_info,DirectionPrefer dp=DP_NONE) {
             array<int,4> counts = {0,0,0,0};
             for(auto& info:text_info)
                 ++counts[get<2>(info)];
+            switch(dp) {
+                case DP_NONE:
+                    break;
+                case DP_HORIZONTAL:
+                    if((counts[0]>1) || (counts[2]>1)) 
+                        counts[1] = counts[3] = 0;
+                case DP_VERTICAL:
+                    if((counts[1]>1) || (counts[3]>1)) 
+                        counts[0] = counts[2] = 0;
+            }
+
             const auto type = distance(counts.begin(),max_element(counts.begin(),counts.end()));
             switch(type) {
                 case 0:
