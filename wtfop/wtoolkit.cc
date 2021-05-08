@@ -720,7 +720,11 @@ REGISTER_OP("GetImageResizeSize")
 	.Input("limit:int32") 
 	.Input("align:int32")
 	.Output("output_size:int32")
-	.SetShapeFn(shape_inference::UnchangedShape);
+    .SetShapeFn([](shape_inference::InferenceContext* c){
+        auto shape0 = c->Vector(2);
+        c->set_output(0,shape0);
+		return Status::OK();
+    });
 
 class GetImageResizeSizeOp: public OpKernel {
         public:
