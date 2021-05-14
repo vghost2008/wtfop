@@ -27,6 +27,8 @@ ops.NotDifferentiable("BoxesMatchWithPred")
 ops.NotDifferentiable("SampleLabels")
 ops.NotDifferentiable("GetBoxesDeltas")
 ops.NotDifferentiable("ItemAssign")
+ops.NotDifferentiable("OpenPoseEncode")
+ops.NotDifferentiable("OpenPoseDecode")
 
 module_path = os.path.realpath(__file__)
 module_dir = os.path.dirname(module_path)
@@ -447,6 +449,22 @@ def median_blur(image,ksize=5):
 
 def bilateral_filter(image,d=5,sigmaColor=5,sigmaSpace=4):
     return wtfop_module.bilateral_filter(image=image,d=d,sigmaColor=sigmaColor,sigmaSpace=sigmaSpace)
+
+def open_pose_encode(keypoints,output_size,glength,keypoints_pair,l_delta=2.0,gaussian_delta=2.0):
+    out = wtfop_module.open_pose_encode(keypoints=keypoints,output_size=output_size,glength=glength,
+    keypoints_pair=keypoints_pair,l_delta=l_delta,gaussian_delta=gaussian_delta)
+    return out
+
+def open_pose_decode(conf_maps,paf_maps,keypoints_pair,keypoints_th=0.1,interp_samples=10,paf_score_th=0.1,conf_th=0.7,max_detection=100):
+    out = wtfop_module.open_pose_decode(conf_maps=conf_maps,
+    paf_maps=paf_maps,
+    keypoints_pair=keypoints_pair,
+    keypoints_th=keypoints_th,
+    interp_samples=interp_samples,
+    paf_score_th=paf_score_th,
+    conf_th=conf_th,
+    max_detection=max_detection)
+    return out
 
 #OCR ops
 def merge_character(bboxes, labels,dlabels, expand=0.01,super_box_type=68,space_type=69):

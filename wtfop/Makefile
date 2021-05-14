@@ -15,7 +15,7 @@ CXX11_ABI=0
 OPT = -O3
 #OPT = -g
 CUDA_OPT = -O0
-#UDA_OPT = -g
+#CUDA_OPT = -g
 CXXFLAGS = -std=c++14 -Wno-ignored-attributes -Wno-unused-result -shared ${OPT} -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=${CXX11_ABI} -fPIC -L${TF_LIB} -ltensorflow_framework `pkg-config --cflags opencv` `pkg-config --libs opencv`
 #CUDAFLAGS = -std=c++14 -g -shared -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=0 -DGOOGLE_CUDA --expt-relaxed-constexpr -Xcompiler="-fPIC"
 #CUDAFLAGS = -std=c++14 -g -I $(TF_INC) -D_GLIBCXX_USE_CXX11_ABI=0 -DGOOGLE_CUDA --expt-relaxed-constexpr -Xcompiler="-fPIC" -arch=sm_30
@@ -26,11 +26,11 @@ build: wtfop.so
 
 #wtfop.so: wtfop.cc bboxes.cc wtoolkit.cc nlp.cc dentalfilm.cc medical.cc
 ifdef USE_CUDA
-targets = mask.o roipooling.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o bboxes_encode_decode_gpu.o center_net_encode_decode.o opencvadapter.o matcher.o matcher_gpu.o ocr_ops.o nms_gpu.o link.o left_pool.o right_pool.o bottom_pool.o top_pool.o fcos_encode.o qctoolkit.o cell_ops.o
+targets = mask.o roipooling.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o bboxes_encode_decode_gpu.o center_net_encode_decode.o opencvadapter.o matcher.o matcher_gpu.o ocr_ops.o nms_gpu.o link.o left_pool.o right_pool.o bottom_pool.o top_pool.o fcos_encode.o qctoolkit.o cell_ops.o open_pose_decode_imp.o open_pose.o
 CXXFLAGS += -DGOOGLE_CUDA -DEIGEN_USE_GPU -DEIGEN_USE_THREADS
 CXXFLAGS += -I/usr/local/cuda/include 
 else
-targets = mask.o roipooling.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o center_net_encode_decode.o opencvadapter.o matcher.o ocr_ops.o left_pool.o right_pool.o bottom_pool.o top_pool.o fcos_encode.o qctoolkit.o cell_ops.o
+targets = mask.o roipooling.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o center_net_encode_decode.o opencvadapter.o matcher.o ocr_ops.o left_pool.o right_pool.o bottom_pool.o top_pool.o fcos_encode.o qctoolkit.o cell_ops.o open_pose_decode_imp.o open_pose.o
 endif
 
 bboxes_encode_decode_gpu.o:bboxes_encode_decode_gpu.cu
