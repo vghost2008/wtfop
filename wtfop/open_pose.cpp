@@ -108,7 +108,9 @@ class OpenPoseEncodeOp: public OpKernel {
                     for(auto k=0; k<num_keypoints; ++k) {
                         const auto x0 = keypoints(i,j,k,0)*(output_size[1]-1);
                         const auto y0 = keypoints(i,j,k,1)*(output_size[0]-1);
-                        draw_gaussian(heatmaps_conf,i,x0,y0,k,gaussian_delta_);
+
+						if((x0>=0) && (y0>=0))
+                        	draw_gaussian(heatmaps_conf,i,x0,y0,k,gaussian_delta_);
                     }
                 }
             }
@@ -126,7 +128,9 @@ class OpenPoseEncodeOp: public OpKernel {
                         const auto y0 = keypoints(i,j,index0,1)*(output_size[0]-1);
                         const auto x1 = keypoints(i,j,index1,0)*(output_size[1]-1);
                         const auto y1 = keypoints(i,j,index1,1)*(output_size[0]-1);
-                        draw_paf(heatmaps_paf,data_ct,i,x0,y0,x1,y1,k);
+
+						if((x0>=0) && (y0>=0) && (x1>=0) && (y1>=0))
+                        	draw_paf(heatmaps_paf,data_ct,i,x0,y0,x1,y1,k);
                     }
                 }
             }
