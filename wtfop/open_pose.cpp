@@ -38,8 +38,8 @@ typedef Eigen::GpuDevice GPUDevice;
  */
 REGISTER_OP("OpenPoseEncode")
     .Attr("T: {float,double,int32,int64}")
-	.Attr("l_delta:float=2.0")
-	.Attr("gaussian_delta:float=2.0")
+	.Attr("l_delta:float=8.0")
+	.Attr("gaussian_delta:float=8.0")
 	.Attr("keypoints_pair:list(int)")
     .Input("keypoints: T")
     .Input("output_size: int32")
@@ -48,7 +48,7 @@ REGISTER_OP("OpenPoseEncode")
 	.Output("output_paf_map:T")
 	.SetShapeFn([](shape_inference::InferenceContext* c) {
             const auto input_shape0 = c->input(0);
-            const auto points_nr = c->Value(c->Dim(input_shape0,3));
+            const auto points_nr = c->Value(c->Dim(input_shape0,2));
             const auto batch_size = c->Dim(input_shape0,0);
             vector<int> keypoints_pair;
 			c->GetAttr("keypoints_pair", &keypoints_pair);
@@ -81,14 +81,15 @@ class OpenPoseEncodeOp: public OpKernel {
             OP_REQUIRES(context, _keypoints.dims() == 4, errors::InvalidArgument("keypoints data must be 4-dimension"));
             OP_REQUIRES(context, _gsize.dims() == 1, errors::InvalidArgument("gsize data must be 1-dimension"));
 
-            auto keypoints = _keypoints.template tensor<T,4>();
-            auto gsize = _gsize.template tensor<int,1>();
-            int           dims_4d0[4]            = {int(batch_size),output_size[0],output_size[1],num_keypoints};
-            int           dims_4d1[4]            = {int(batch_size),output_size[0],output_size[1],keypoints_pair_.size()};
+            auto         keypoints       = _keypoints.template tensor<T,4>();
+            auto         gsize           = _gsize.template tensor<int,1>();
+            int          dims_4d0[4]     = {int(batch_size),output_size[0],output_size[1],num_keypoints};
+            int          dims_4d1[4]     = {int(batch_size),output_size[0],output_size[1],keypoints_pair_.size()};
             TensorShape  outshape0;
             TensorShape  outshape1;
             Tensor      *output_conf_map = NULL;
-            Tensor      *output_paf_map = NULL;
+            Tensor      *output_paf_map  = NULL;
+            const auto   max_data_nr     = _keypoints.dim_size(1);
 
             TensorShapeUtils::MakeShape(dims_4d0, 4, &outshape0);
             TensorShapeUtils::MakeShape(dims_4d1, 4, &outshape1);
@@ -120,7 +121,8 @@ class OpenPoseEncodeOp: public OpKernel {
             const auto kpoints_pair_nr = keypoints_pair_.size()/2;
             Eigen::Tensor<float,4,Eigen::RowMajor> data_ct(batch_size,output_size[0],output_size[1],num_keypoints);
             for(auto i=0; i<batch_size; ++i) {
-                for(auto j=0; j<gsize(i); ++j) {
+                const auto nr = min<int>(max_data_nr,gsize(i));
+                for(auto j=0; j<nr; ++j) {
                     for(auto k=0; k<kpoints_pair_nr; ++k) {
                         const auto index0 = keypoints_pair_[k*2];
                         const auto index1 = keypoints_pair_[k*2+1];
@@ -137,42 +139,49 @@ class OpenPoseEncodeOp: public OpKernel {
         }
 
         template<typename DT>
-        static void draw_gaussian(DT& data,int batch_index,int cx,int cy,int k,float radius)
+        static void draw_gaussian(DT& data,int batch_index,float cx,float cy,int k,float radius)
         {
-            const auto spread_range = radius*2;
-            const auto width   = data.dimension(2);
-            const auto height  = data.dimension(1);
-            const auto xtl     = max(0,int(cx-spread_range));
-            const auto ytl     = max(0,int(cy-spread_range));
-            const auto xbr     = min<int>(width,int(cx+spread_range+1));
-            const auto ybr     = min<int>(height,int(cy+spread_range+1));
-            const auto sigma_p = radius*radius;
+            const auto th           = 4.6052;
+            const auto spread_range = radius *sqrt(2*th);
+            const auto width        = data.dimension(2);
+            const auto height       = data.dimension(1);
+            const auto xtl          = max(0,int(cx-spread_range));
+            const auto ytl          = max(0,int(cy-spread_range));
+            const auto xbr          = min<int>(width,int(cx+spread_range+1));
+            const auto ybr          = min<int>(height,int(cy+spread_range+1));
+            const auto sigma_p      = 2 *radius*radius;
 
             for(auto x=xtl; x<xbr; ++x) {
                 for(auto y=ytl; y<ybr; ++y) {
                     auto dx = x-cx;
                     auto dy = y-cy;
-                    auto v = exp(-(dx*dx+dy*dy)/sigma_p);
+                    const auto d = (dx*dx+dy*dy);
+                    const auto expv = d/sigma_p;
+                    if (expv>th)
+                        continue;
+                    auto v = exp(-expv);
                     data(batch_index,y,x,k) = max(data(batch_index,y,x,k),v);
                 }
             }
         }
         template<typename DT,typename CT>
-        void draw_paf(DT& data,CT& ct,int batch_index,int x0,int y0,int x1,int y1,int k)
+        void draw_paf(DT& data,CT& ct,int batch_index,float x0,float y0,float x1,float y1,int k)
         {
+            const auto dis     = distance(x0,y0,x1,y1);
+            const auto l_delta = max<float>(dis *0.125,l_delta_);
             const auto width   = data.dimension(2);
             const auto height  = data.dimension(1);
-            const auto xtl     = max<int>(min(x0,x1)-l_delta_,0);
-            const auto ytl     = max<int>(min(y0,y1)-l_delta_,0);
-            const auto xbr     = min<int>(max<int>(x0,x1)+l_delta_+1,width);
-            const auto ybr     = min<int>(max<int>(y0,y1)+l_delta_+1,height);
-            const auto dis = distance(x0,y0,x1,y1);
-            const auto vx = (x1-x0)/dis;
-            const auto vy = (y1-y0)/dis;
-            const auto A = y1-y0;
-            const auto B = x0-x1;
-            const auto C = y0*x1-x0*y1;
-            const auto D = sqrt(A*A+B*B+1e-8);
+            const auto xtl     = max<int>(min(x0,x1)-l_delta,0);
+            const auto ytl     = max<int>(min(y0,y1)-l_delta,0);
+            const auto xbr     = min<int>(max<int>(x0,x1)+l_delta+1,width);
+            const auto ybr     = min<int>(max<int>(y0,y1)+l_delta+1,height);
+            const auto vx      = (x1-x0)/dis;
+            const auto vy      = (y1-y0)/dis;
+            const auto A       = y1-y0;
+            const auto B       = x0-x1;
+            const auto C       = y0 *x1-x0 *y1;
+            const auto D       = sqrt(A *A+B *B+1e-8);
+            bool       set_any = false;
 
             for(auto x=xtl; x<xbr; ++x) {
                 for(auto y=ytl; y<ybr; ++y) {
@@ -183,15 +192,21 @@ class OpenPoseEncodeOp: public OpKernel {
                     if((j0<0) || (j0>dis))
                         continue;
 
-                    if(fabs((x*A+y*B+C)/D)>l_delta_)
+                    if(fabs((x*A+y*B+C)/D)>l_delta)
                         continue;
+
+                    set_any = true;
+
                     ct(batch_index,y,x,k) = ct(batch_index,y,x,k)+1;
+
                     const auto nr = ct(batch_index,y,x,k);
+
                     if(nr>1) {
                         auto old_vx = data(batch_index,y,x,k*2);
                         auto old_vy = data(batch_index,y,x,k*2+1);
                         auto new_vx = (old_vx*(nr-1)+vx)/nr;
                         auto new_vy = (old_vy*(nr-1)+vy)/nr;
+
                         data(batch_index,y,x,k*2) = new_vx;
                         data(batch_index,y,x,k*2+1) = new_vy;
                     } else {
@@ -200,10 +215,32 @@ class OpenPoseEncodeOp: public OpKernel {
                     }
                 }
             }
+            if(!set_any) {
+                auto x = int((x0+x1)/2+0.5);
+                auto y = int((y0+y1)/2+0.5);
+
+                ct(batch_index,y,x,k) = ct(batch_index,y,x,k)+1;
+
+                const auto nr = ct(batch_index,y,x,k);
+
+                if(nr>1) {
+                    auto old_vx = data(batch_index,y,x,k*2);
+                    auto old_vy = data(batch_index,y,x,k*2+1);
+                    auto new_vx = (old_vx*(nr-1)+vx)/nr;
+                    auto new_vy = (old_vy*(nr-1)+vy)/nr;
+
+                    data(batch_index,y,x,k*2) = new_vx;
+                    data(batch_index,y,x,k*2+1) = new_vy;
+                } else {
+                    data(batch_index,y,x,k*2) = vx;
+                    data(batch_index,y,x,k*2+1) = vy;
+                }
+            }
         }
         inline float distance(float x0,float y0,float x1,float y1) {
             const auto dx = x1-x0;
             const auto dy = y1-y0;
+
             return sqrt(dx*dx+dy*dy+1e-8);
         }
 	private:

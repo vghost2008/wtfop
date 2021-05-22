@@ -16,11 +16,11 @@ sess = tf.Session()
 sess.run(tf.global_variables_initializer())
 output = wop.open_pose_encode(keypoints,output_size,glength,keypoints_pair,l_delta,gaussian_delta)
 conf_map,paf_map= sess.run(output)
-'''for i in range(conf_map.shape[-1]):
+for i in range(conf_map.shape[-1]):
 	plt.figure(i,(10,10))
 	img = conf_map[0,:,:,i]*255
 	plt.imshow(img)
-plt.show()'''
+plt.show()
 
 for i in range(paf_map.shape[-1]):
 	plt.figure(i,(10,10))

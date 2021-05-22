@@ -363,8 +363,12 @@ vector<vector<pair<float,float>>> openpose_decode_imp(const cv::Mat& conf_map,co
         vector<pair<float,float>> lpoints;
         lpoints.reserve(ds.size());
         for(auto id:ds) {
-            const auto p = key_points_list[id];
-            lpoints.emplace_back(p.point.x,p.point.y);
+            if(id>=0) {
+                const auto p = key_points_list[id];
+                lpoints.emplace_back(p.point.x,p.point.y);
+            } else {
+                lpoints.emplace_back(-1,-1);
+            }
         }
         person_wise_keypoints.emplace_back(std::move(lpoints));
     }

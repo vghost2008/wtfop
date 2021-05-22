@@ -29,6 +29,7 @@ ops.NotDifferentiable("GetBoxesDeltas")
 ops.NotDifferentiable("ItemAssign")
 ops.NotDifferentiable("OpenPoseEncode")
 ops.NotDifferentiable("OpenPoseDecode")
+ops.NotDifferentiable("Center2BoxesEncode")
 
 module_path = os.path.realpath(__file__)
 module_dir = os.path.dirname(module_path)
@@ -282,6 +283,14 @@ def center_boxes_encode(gbboxes, glabels,glength,output_size,num_classes=2,max_b
 def center_boxes_decode(heatmaps_tl,heatmaps_br,heatmaps_c,offset_tl,offset_br,offset_c,k=100):
     out = wtfop_module.center_boxes_decode(heatmaps_tl=heatmaps_tl,heatmaps_br=heatmaps_br,heatmaps_c=heatmaps_c,offset_tl=offset_tl,offset_br=offset_br,offset_c=offset_c,k=k)
     return out[0],out[1],out[2],out[3],out[4]
+
+def center2_boxes_encode(gbboxes, glabels,glength,output_size,num_classes=2,gaussian_iou=0.7):
+    if glabels.dtype != tf.int32:
+        glabels= tf.cast(glabels,tf.int32)
+    out = wtfop_module.center2_boxes_encode(gbboxes=gbboxes,glabels=glabels,glength=glength,
+    output_size=output_size,num_classes=num_classes,gaussian_iou=gaussian_iou)
+    c_map,hw_offset,mask = out[0],out[1],out[2]
+    return c_map,hw_offset,mask
 
 '''
  * prio_scaling:[4]
