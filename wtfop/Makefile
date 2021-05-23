@@ -26,11 +26,11 @@ build: wtfop.so
 
 #wtfop.so: wtfop.cc bboxes.cc wtoolkit.cc nlp.cc dentalfilm.cc medical.cc
 ifdef USE_CUDA
-targets = mask.o roipooling.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o bboxes_encode_decode_gpu.o center_net_encode_decode.o opencvadapter.o matcher.o matcher_gpu.o ocr_ops.o nms_gpu.o link.o left_pool.o right_pool.o bottom_pool.o top_pool.o fcos_encode.o qctoolkit.o cell_ops.o open_pose_decode_imp.o open_pose.o
+targets = mask.o roipooling.o bboxes.o wtoolkit.o nlp.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o bboxes_encode_decode_gpu.o center_net_encode_decode.o opencvadapter.o matcher.o matcher_gpu.o nms_gpu.o link.o left_pool.o right_pool.o bottom_pool.o top_pool.o fcos_encode.o qctoolkit.o cell_ops.o open_pose_decode_imp.o open_pose.o
 CXXFLAGS += -DGOOGLE_CUDA -DEIGEN_USE_GPU -DEIGEN_USE_THREADS
 CXXFLAGS += -I/usr/local/cuda/include 
 else
-targets = mask.o roipooling.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o center_net_encode_decode.o opencvadapter.o matcher.o ocr_ops.o left_pool.o right_pool.o bottom_pool.o top_pool.o fcos_encode.o qctoolkit.o cell_ops.o open_pose_decode_imp.o open_pose.o
+targets = mask.o roipooling.o bboxes.o wtoolkit.o nlp.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o center_net_encode_decode.o opencvadapter.o matcher.o left_pool.o right_pool.o bottom_pool.o top_pool.o fcos_encode.o qctoolkit.o cell_ops.o open_pose_decode_imp.o open_pose.o
 endif
 
 bboxes_encode_decode_gpu.o:bboxes_encode_decode_gpu.cu
