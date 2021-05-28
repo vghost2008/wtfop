@@ -29,6 +29,7 @@ ops.NotDifferentiable("GetBoxesDeltas")
 ops.NotDifferentiable("ItemAssign")
 ops.NotDifferentiable("OpenPoseEncode")
 ops.NotDifferentiable("OpenPoseDecode")
+ops.NotDifferentiable("Center2BoxesEncode")
 
 module_path = os.path.realpath(__file__)
 module_dir = os.path.dirname(module_path)
@@ -283,6 +284,21 @@ def center_boxes_decode(heatmaps_tl,heatmaps_br,heatmaps_c,offset_tl,offset_br,o
     out = wtfop_module.center_boxes_decode(heatmaps_tl=heatmaps_tl,heatmaps_br=heatmaps_br,heatmaps_c=heatmaps_c,offset_tl=offset_tl,offset_br=offset_br,offset_c=offset_c,k=k)
     return out[0],out[1],out[2],out[3],out[4]
 
+def center2_boxes_encode(gbboxes, glabels,glength,output_size,num_classes=2,gaussian_iou=0.7):
+    if glabels.dtype != tf.int32:
+        glabels= tf.cast(glabels,tf.int32)
+    out = wtfop_module.center2_boxes_encode(gbboxes=gbboxes,glabels=glabels,glength=glength,
+    output_size=output_size,num_classes=num_classes,gaussian_iou=gaussian_iou)
+    c_map,hw_offset,mask = out[0],out[1],out[2]
+    return c_map,hw_offset,mask
+
+def center2_boxes_decode(heatmaps,offset,hw,k=100,threshold=0.1):
+    out = wtfop_module.center2_boxes_decode(heatmaps=heatmaps,offset=offset,hw=hw,k=k,threshold=threshold)
+    bboxes,labels,probs,index,lens = out[0],out[1],out[2],out[3],out[4]
+
+    return bboxes,labels,probs,index,lens
+
+
 '''
  * prio_scaling:[4]
  * bottom_boxes:[X,4](ymin,xmin,ymax,xmax) 候选box,相对坐标
@@ -478,6 +494,10 @@ def mach_words(targets, texts):
     out = wtfop_module.mach_words(targets=targets,texts=texts)
     return out
 
+def fair_mot(bboxes,probs,embedding,is_first_frame,det_thredh=0.1,frame_rate=30,track_buffer=30):
+    out = wtfop_module.fair_mot(bboxes=bboxes,probs=probs,embedding=embedding,is_first_frame=is_first_frame,det_thredh=det_thredh,
+                                frame_rate=frame_rate,track_buffer=track_buffer)
+    return out[0],out[1]
 
 @ops.RegisterGradient("DeformConvOp")
 def _deform_conv_grad(op, grad):
