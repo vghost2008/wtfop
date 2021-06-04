@@ -107,7 +107,7 @@ class Center2BoxesEncodeOp: public OpKernel {
 
             OP_REQUIRES_OK(context, context->allocate_output(0, outshape0, &output_heatmaps_c));
             OP_REQUIRES_OK(context, context->allocate_output(1, outshape1, &output_hw_offset));
-            OP_REQUIRES_OK(context, context->allocate_output(2, outshape1, &output_mask));
+            OP_REQUIRES_OK(context, context->allocate_output(2, outshape2, &output_mask));
 
             auto heatmaps_c  = output_heatmaps_c->template tensor<T,4>();
             auto hw_offsets     = output_hw_offset->template tensor<T,4>();
@@ -139,8 +139,8 @@ class Center2BoxesEncodeOp: public OpKernel {
                         continue;
                     }
 
-                    draw_gaussian(heatmaps_c,fxc,fyc,r0,i,label,5);
-                    draw_gaussianv2(max_probs,hw_offsets,fxc,fyc,r0,h,w,i,5);
+                    draw_gaussian(heatmaps_c,xc,yc,r0,i,label,5);
+                    draw_gaussianv2(max_probs,hw_offsets,xc,yc,r0,h,w,i,5);
 
                     hw_offsets(i,yc,xc,2) = fyc-yc;
                     hw_offsets(i,yc,xc,3) = fxc-xc;
@@ -179,7 +179,7 @@ class Center2BoxesEncodeOp: public OpKernel {
             const auto ytl     = max(0,int(cy-radius));
             const auto xbr     = min<int>(width,int(cx+radius+1));
             const auto ybr     = min<int>(height,int(cy+radius+1));
-            const auto sigma   = (2*radius+1)/delta;
+            const auto sigma   = (2 *radius+1)/delta;
             const auto c_index = class_index-1;
 
             for(auto x=xtl; x<xbr; ++x) {
