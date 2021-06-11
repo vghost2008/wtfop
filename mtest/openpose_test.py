@@ -14,22 +14,13 @@ glength = np.array([1],dtype=np.int32)
 
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
-output = wop.open_pose_encode(keypoints,output_size,glength,keypoints_pair,l_delta,gaussian_delta)
-conf_map,paf_map= sess.run(output)
+output = wop.hr_net_encode(keypoints,output_size,glength,gaussian_delta)
+conf_map,indexs = sess.run(output)
+print(indexs)
 for i in range(conf_map.shape[-1]):
 	plt.figure(i,(10,10))
 	img = conf_map[0,:,:,i]*255
+	print(i,np.reshape(conf_map[0],[-1])[23723])
 	plt.imshow(img)
 plt.show()
 
-for i in range(paf_map.shape[-1]):
-	plt.figure(i,(10,10))
-	data = paf_map[0,:,:,i]
-	print(i,np.min(data),np.mean(data),np.max(data))
-	img = paf_map[0,:,:,i]*255
-	plt.imshow(img,cmap="gray")
-plt.show()
-#def open_pose_decode(conf_maps,paf_maps,keypoints_pair,keypoints_th=0.1,interp_samples=10,paf_score_th=0.1,conf_th=0.7,max_detection=100):
-output = wop.open_pose_decode(conf_map,paf_map,keypoints_pair,max_detection=2)
-keypoints = sess.run(output)
-print(keypoints)

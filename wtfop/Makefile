@@ -11,7 +11,7 @@ TF_LIB = $(shell python -c 'import tensorflow as tf; print(tf.sysconfig.get_lib(
 #all: clean build
 #g++ -std=c++14 -shared -g -o $@ $^ -I $(TF_INC) -fPIC -D_GLIBCXX_USE_CXX11_ABI=0 -L${TF_LIB} -ltensorflow_framework 
 #CXXFLAGS = -I ${TF_INC} -fPIC -L${TF_LIB} -ltensorflow_framework -D_GLIBCXX_USE_CXX11_ABI
-CXX11_ABI=1
+CXX11_ABI=0
 OPT = -O3
 #OPT = -g
 CUDA_OPT = -O0
@@ -26,11 +26,11 @@ build: wtfop.so
 
 #wtfop.so: wtfop.cc bboxes.cc wtoolkit.cc nlp.cc dentalfilm.cc medical.cc
 ifdef USE_CUDA
-targets = mask.o roipooling.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o bboxes_encode_decode_gpu.o center_net_encode_decode.o opencvadapter.o matcher.o matcher_gpu.o ocr_ops.o nms_gpu.o link.o left_pool.o right_pool.o bottom_pool.o top_pool.o fcos_encode.o qctoolkit.o cell_ops.o open_pose_decode_imp.o open_pose.o center_net2_encode_decode.o mot.o kalman_filter.o strack.o mot_matching.o jde_tracker.o
+targets = mask.o roipooling.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o bboxes_encode_decode_gpu.o center_net_encode_decode.o opencvadapter.o matcher.o matcher_gpu.o ocr_ops.o nms_gpu.o link.o left_pool.o right_pool.o bottom_pool.o top_pool.o fcos_encode.o qctoolkit.o cell_ops.o open_pose_decode_imp.o open_pose.o center_net2_encode_decode.o mot.o kalman_filter.o strack.o mot_matching.o jde_tracker.o hrnet_pe.o match_by_tag.o
 CXXFLAGS += -DGOOGLE_CUDA -DEIGEN_USE_GPU -DEIGEN_USE_THREADS
 CXXFLAGS += -I/usr/local/cuda/include 
 else
-targets = mask.o roipooling.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o center_net_encode_decode.o opencvadapter.o matcher.o ocr_ops.o left_pool.o right_pool.o bottom_pool.o top_pool.o fcos_encode.o qctoolkit.o cell_ops.o open_pose_decode_imp.o open_pose.o center_net2_encode_decode.o mot.o kalman_filter.o strack.o mot_matching.o jde_tracker.o
+targets = mask.o roipooling.o bboxes.o wtoolkit.o nlp.o medical.o gn.o anchor_bboxes.o bboxes_encode_decode.o nms.o center_net_encode_decode.o opencvadapter.o matcher.o ocr_ops.o left_pool.o right_pool.o bottom_pool.o top_pool.o fcos_encode.o qctoolkit.o cell_ops.o open_pose_decode_imp.o open_pose.o center_net2_encode_decode.o mot.o kalman_filter.o strack.o mot_matching.o jde_tracker.o hrnet_pe.o match_by_tag.o
 endif
 
 bboxes_encode_decode_gpu.o:bboxes_encode_decode_gpu.cu

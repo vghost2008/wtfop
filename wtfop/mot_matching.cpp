@@ -91,6 +91,40 @@ void linear_assignment(const Eigen::MatrixXf& cost_matrix,float thresh,vector<pa
         }
     }
 }
+void linear_assignment(float* data,int data_nr,float* thresh,std::vector<std::pair<int,int>>* matches,std::vector<int>* unmatched_a,std::vector<int>* unmatched_b)
+{
+    matches->clear();
+    if(nullptr != unmatched_a)
+        unmatched_a->clear();
+    if(nullptr != unmatched_b)
+        unmatched_b->clear();
+
+    auto assign_cost= unique_ptr<int[]>(new int[data_nr]);
+    auto rowsol = unique_ptr<int[]>(new int[data_nr]);
+    auto colsol = unique_ptr<int[]>(new int[data_nr]);
+    auto u = unique_ptr<float[]>(new float[data_nr]);
+    auto v = unique_ptr<float[]>(new float[data_nr]);
+    auto new_cost_matrix = (float(*)[data_nr])(data);
+
+    lap<false>(data_nr,data,false,rowsol.get(),colsol.get(),u.get(),v.get());
+
+    if(nullptr != thresh) {
+        for(auto i=0; i<data_nr; ++i) {
+            auto j = rowsol.get()[i];
+            if(new_cost_matrix[i][j]<*thresh) {
+                matches->emplace_back(make_pair(i,j));
+            } else {
+                unmatched_a->push_back(i);
+                unmatched_b->push_back(j);
+            }
+        }
+    } else {
+        for(auto i=0; i<data_nr; ++i) {
+            auto j = rowsol.get()[i];
+            matches->emplace_back(make_pair(i,j));
+        }
+    }
+}
 void fuse_motion(KalmanFilterPtr_t kf,const STrackPtrs_t& tracks, const STrackPtrs_t& detections,Eigen::MatrixXf& cost_matrix,bool only_position,float lambda)
 {
     if(cost_matrix.size() == 0)

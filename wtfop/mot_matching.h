@@ -16,4 +16,5 @@ namespace MOT
     float iou_dis(const BBox_t& va, const BBox_t& vb);
 
     void linear_assignment(const Eigen::MatrixXf& cost_matrix,float thresh,std::vector<std::pair<int,int>>* matches,std::vector<int>* unmatched_a,std::vector<int>* unmatched_b);
+    void linear_assignment(float* data,int data_nr,float* thresh,std::vector<std::pair<int,int>>* matches,std::vector<int>* unmatched_a=nullptr,std::vector<int>* unmatched_b=nullptr);
 }

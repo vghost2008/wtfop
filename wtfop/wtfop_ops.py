@@ -466,6 +466,24 @@ def median_blur(image,ksize=5):
 def bilateral_filter(image,d=5,sigmaColor=5,sigmaSpace=4):
     return wtfop_module.bilateral_filter(image=image,d=d,sigmaColor=sigmaColor,sigmaSpace=sigmaSpace)
 
+def hr_net_encode(keypoints,output_size,glength,gaussian_delta=2.0):
+    out = wtfop_module.hr_net_pe(keypoints=keypoints,output_size=output_size,glength=glength,
+    gaussian_delta=gaussian_delta)
+    return out[0],out[1]
+
+def match_by_tag(tag_k,loc_k,val_k,detection_threshold=0.1,tag_threshold=1.0,use_detection_val=True):
+    out = wtfop_module.match_by_tag(tag_k=tag_k,
+                                    loc_k=loc_k,
+                                    val_k=val_k,
+                                    detection_threshold=detection_threshold,
+                                    tag_threshold=tag_threshold,
+                                    use_detection_val=use_detection_val)
+    return out
+
+def hr_net_refine(ans,det,tag):
+    out = wtfop_module.hr_net_refine(ans=ans,det=det,tag=tag)
+    return out
+
 def open_pose_encode(keypoints,output_size,glength,keypoints_pair,l_delta=2.0,gaussian_delta=2.0):
     out = wtfop_module.open_pose_encode(keypoints=keypoints,output_size=output_size,glength=glength,
     keypoints_pair=keypoints_pair,l_delta=l_delta,gaussian_delta=gaussian_delta)
