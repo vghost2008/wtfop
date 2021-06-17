@@ -29,7 +29,7 @@ class STrack
         /*
          * bboxes: [ymin,xmin,ymax,xmax]
          */
-        STrack(const Eigen::VectorXf& bboxes,float score,const Eigen::VectorXf& temp_feat,int buffer_size=30);
+        STrack(const Eigen::VectorXf& bboxes,float score,const Eigen::VectorXf& temp_feat=Eigen::VectorXf(),int buffer_size=30);
         void update_features(const Eigen::VectorXf& feat);
         void predict();
         static void multi_predict(STrackPtrs_t& stracks);

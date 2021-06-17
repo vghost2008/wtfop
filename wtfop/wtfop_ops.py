@@ -30,6 +30,7 @@ ops.NotDifferentiable("ItemAssign")
 ops.NotDifferentiable("OpenPoseEncode")
 ops.NotDifferentiable("OpenPoseDecode")
 ops.NotDifferentiable("Center2BoxesEncode")
+ops.NotDifferentiable("DmprPsDecoder")
 
 module_path = os.path.realpath(__file__)
 module_dir = os.path.dirname(module_path)
@@ -514,6 +515,11 @@ def mach_words(targets, texts):
 
 def fair_mot(bboxes,probs,embedding,is_first_frame,det_thredh=0.1,frame_rate=30,track_buffer=30):
     out = wtfop_module.fair_mot(bboxes=bboxes,probs=probs,embedding=embedding,is_first_frame=is_first_frame,det_thredh=det_thredh,
+                                frame_rate=frame_rate,track_buffer=track_buffer)
+    return out[0],out[1]
+
+def sort_mot(bboxes,probs,is_first_frame,det_thredh=0.1,frame_rate=30,track_buffer=30):
+    out = wtfop_module.sort_mot(bboxes=bboxes,probs=probs,is_first_frame=is_first_frame,det_thredh=det_thredh,
                                 frame_rate=frame_rate,track_buffer=track_buffer)
     return out[0],out[1]
 

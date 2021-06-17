@@ -10,6 +10,7 @@ namespace MOT
         public:
             JDETracker(float det_thresh=0.1,int frame_rate=30,int track_buffer=30);
             STrackPtrs_t update(const BBoxes_t& bboxes,const Probs_t& probs, const Embeddings_t& embds);
+            STrackPtrs_t update(const BBoxes_t& bboxes,const Probs_t& probs);
         private:
             STrackPtrs_t joint_stracks(STrackPtrs_t& va,STrackPtrs_t& vb);
             //STrackPtrs_t sub_stracks(STrackPtrs_t& va,STrackPtrs_t& vb);

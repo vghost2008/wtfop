@@ -17,6 +17,7 @@ STrack::STrack(const Eigen::VectorXf& bboxes,float score,const Eigen::VectorXf& 
     bbox_[1] = bboxes[0]+h/2;
     bbox_[2] = w/max<float>(h,1e-4);
     bbox_[3] = h;
+
     update_features(temp_feat);
 
     mean_.setZero();
@@ -24,7 +25,11 @@ STrack::STrack(const Eigen::VectorXf& bboxes,float score,const Eigen::VectorXf& 
 }
 void STrack::update_features(const Eigen::VectorXf& feat)
 {
+    if(feat.size()==0) 
+        return;
+
     curr_feat_ = feat;
+
     if(smooth_feat_.size() == 0)
         smooth_feat_ = feat;
     else
